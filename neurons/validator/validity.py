@@ -2,13 +2,13 @@ import bittensor as bt
 from rdkit import Chem
 from rdkit.Chem import Descriptors
 
-from utils import (
-    get_smiles, 
-    get_heavy_atom_count, 
+from utils.molecules import (
+    get_smiles,
+    get_heavy_atom_count,
     compute_maccs_entropy,
-    find_chemically_identical,
-    is_reaction_allowed
+    find_chemically_identical
 )
+from utils.reactions import is_reaction_allowed
 
 
 def validate_molecules_and_calculate_entropy(
