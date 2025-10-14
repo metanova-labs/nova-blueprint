@@ -1,0 +1,6 @@
+python-dotenv==1.0.1
+requests>=2.32.4
+bittensor==9.9.0
+substrate-interface==1.7.11
+datasets==3.3.2
+huggingface-hub==0.29.1

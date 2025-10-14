@@ -1,0 +1,6 @@
+venv
+.env
+.miner_runs/
+results/
+*.log
+__pycache__
