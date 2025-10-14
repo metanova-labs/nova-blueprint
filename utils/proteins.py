@@ -40,6 +40,26 @@ def get_sequence_from_protein_code(protein_code: str) -> str:
         bt.logging.error(f"Error accessing Hugging Face dataset: {e}")
         return None
 
+def get_code_from_protein_sequence(protein_sequence: str) -> str:
+    """
+    Get the protein code from its sequence in Hugging Face dataset.
+    """
+    try:
+        dataset = load_dataset("Metanova/Proteins", split="train")
+        
+        for i in range(len(dataset)):
+            if dataset[i]["Sequence"] == protein_sequence:
+                code = dataset[i]["Entry"]
+                bt.logging.info(f"Found code {code} for sequence {protein_sequence} in Hugging Face dataset")
+                return code
+                
+        bt.logging.error(f"Could not find protein {protein_sequence} in Hugging Face dataset")
+        return None
+        
+    except Exception as e:
+        bt.logging.error(f"Error accessing Hugging Face dataset: {e}")
+        return None
+
 
 def get_challenge_params_from_blockhash(block_hash: str, num_antitargets: int, include_reaction: bool = False) -> dict:
     """
