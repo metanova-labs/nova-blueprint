@@ -8,12 +8,9 @@ from rdkit import Chem
 from tqdm import tqdm
 
 import sys
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-NOVA_DIR = os.path.abspath(os.path.join(BASE_DIR, ".."))
-if NOVA_DIR not in sys.path:
-    sys.path.append(NOVA_DIR)
 
-from nova_ph2.config.config_loader import load_config
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
 from miner_utils import validate_molecules_sampler
 from nova_ph2.combinatorial_db.reactions import (
     get_reaction_info, 
@@ -219,7 +216,7 @@ def run_sampler(n_samples: int = 1000,
                 seed: int = None, 
                 subnet_config: dict = None, 
                 output_path: str = None, 
-                save_to_file: bool = True,
+                save_to_file: bool = False,
                 db_path: str = None):
     reactions = get_available_reactions(db_path)
     if not reactions:
@@ -228,8 +225,7 @@ def run_sampler(n_samples: int = 1000,
 
     rxn_ids = [reactions[i][0] for i in range(len(reactions))]
 
-    # TODO: change random reaction choice the one received from payload
-    rxn_id = 4 #random.choice(rxn_ids)
+    rxn_id = int(subnet_config["allowed_reaction"].split(":")[-1])
     bt.logging.info(f"Generating {n_samples} random molecules for reaction {rxn_id}")
 
     # Generate molecules with validation in batches for efficiency
