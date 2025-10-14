@@ -18,10 +18,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from sandbox import runner
 from utils.challenge_params import build_challenge_params
+from neurons.validator import scoring as scoring_module
 from config.config_loader import load_period_duration
 
-NOVA_ROOT = PROJECT_ROOT.parent / "nova"
-sys.path.insert(0, str(NOVA_ROOT))
 from neurons.validator.commitments import get_commitments
 import bittensor as bt
 
@@ -135,7 +134,7 @@ def write_run_artifacts(runs_root: Path, period: str, miner: Miner, result_obj: 
         "result": result_obj,
     }
     try:
-        out_file = results_dir / f"period_{period}_results.json"
+        out_file = results_dir / f"period_{period}_results.jsonl"
         with out_file.open("a", encoding="utf-8") as agg:
             agg.write(json.dumps(combined, separators=(",", ":")) + "\n")
     except Exception as e:
@@ -230,6 +229,26 @@ async def main() -> int:
     challenge_params = build_challenge_params(str(block_hash))
     for miner in miners:
         run_job(miner, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
+
+    try:
+        jsonl_path = (PROJECT_ROOT / "results" / f"period_{period}_results.jsonl")
+        records: List[Dict] = []
+        if jsonl_path.exists():
+            with jsonl_path.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    records.append(json.loads(line))
+            with (PROJECT_ROOT / "output.json").open("w", encoding="utf-8") as out_json:
+                json.dump(records, out_json, separators=(",", ":"))
+    except Exception as e:
+        print(f"[validator] failed to stage output.json: {e}")
+
+    try:
+        await scoring_module.process_epoch(challenge_params, current_block - period_blocks + 1, current_block)
+    except Exception as e:
+        print(f"[validator] scoring step failed: {e}")
 
     return 0
 
