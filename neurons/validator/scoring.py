@@ -27,13 +27,13 @@ from neurons.validator.save_data import submit_epoch_results
 # Global variable to store PSICHIC instance - will be set by validator.py
 psichic = None
 
-async def process_epoch(config, start_block, current_block):
+async def process_epoch(config, epoch: int, uid_to_data: dict):
     """
     Process a single epoch end-to-end.
     """
     global psichic
     try:
-        current_epoch = (current_block // config.epoch_length) - 1
+        current_epoch = epoch
         
         # get target and antitarget sequences from config
         target_sequences = config["target_sequences"]
@@ -50,9 +50,6 @@ async def process_epoch(config, start_block, current_block):
             bt.logging.info(f"Allowed reaction this epoch: {allowed_reaction}")
 
         bt.logging.info(f"Scoring using target proteins: {target_codes}, antitarget proteins: {antitarget_codes}")
-
-        # Gather results
-        uid_to_data = read_miner_output_from_json(os.path.join(NOVA_DIR, "output.json"))
 
         if not uid_to_data:
             bt.logging.info("No valid submissions found this epoch.")
@@ -109,8 +106,7 @@ async def process_epoch(config, start_block, current_block):
             if submit_url:
                 status = submit_epoch_results(
                     config=config,
-                    start_block=start_block,
-                    end_block=current_block,
+                    epoch=current_epoch,
                     target_proteins=target_codes,
                     antitarget_proteins=antitarget_codes,
                     uid_to_data=uid_to_data,

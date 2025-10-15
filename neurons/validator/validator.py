@@ -232,21 +232,26 @@ async def main() -> int:
 
     try:
         jsonl_path = (PROJECT_ROOT / "results" / f"period_{period}_results.jsonl")
-        records: List[Dict] = []
+        uid_to_data: Dict[int, Dict] = {}
         if jsonl_path.exists():
             with jsonl_path.open("r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
                         continue
-                    records.append(json.loads(line))
-            with (PROJECT_ROOT / "output.json").open("w", encoding="utf-8") as out_json:
-                json.dump(records, out_json, separators=(",", ":"))
-    except Exception as e:
-        print(f"[validator] failed to stage output.json: {e}")
+                    rec = json.loads(line)
+                    uid = int(rec["uid"]) if "uid" in rec else None
+                    if uid is None:
+                        continue
+                    molecules = rec.get("result", {}).get("molecules", [])
+                    uid_to_data[uid] = {
+                        "molecules": molecules,
+                        "github_data": rec.get("raw"),
+                    }
+        cfg = dict(challenge_params.get("config", {}))
+        cfg.update(challenge_params.get("challenge", {}))
 
-    try:
-        await scoring_module.process_epoch(challenge_params, current_block - period_blocks + 1, current_block)
+        await scoring_module.process_epoch(cfg, period, uid_to_data)
     except Exception as e:
         print(f"[validator] scoring step failed: {e}")
 
