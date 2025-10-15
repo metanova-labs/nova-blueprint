@@ -133,14 +133,10 @@ def _pg_coerce(x: any) -> any:
 def _safe_num(x: float) -> float:
     return -999.99 if x == -math.inf else x
 
-def _build_competition_payload(config, start_block: int, end_block: int, target_proteins: list[str], antitarget_proteins: list[str]) -> dict:
-    epoch_length = getattr(config, 'epoch_length', 361)
-    end_block = start_block + epoch_length
-    epoch_number = (end_block // epoch_length) - 1
+def _build_competition_payload(config, epoch: int, target_proteins: list[str], antitarget_proteins: list[str]) -> dict:
     return {
-        "epoch": epoch_number,
-        "start_block": start_block,
-        "end_block": end_block,
+        "epoch": epoch,
+        # start_block/end_block intentionally omitted; period is the sole timeline key
         "target_proteins": target_proteins,
         "antitarget_proteins": antitarget_proteins,
         "antitarget_weight": getattr(config, 'antitarget_weight', 1.0),
@@ -271,19 +267,18 @@ def _build_neurons_payload(
     return neurons
 
 def submit_epoch_results(
-    config, 
-    start_block: int, 
-    end_block: int,
+    config,
+    epoch: int,
     target_proteins: list[str],
     antitarget_proteins: list[str],
-    uid_to_data: dict, 
-    valid_molecules_by_uid: dict, 
+    uid_to_data: dict,
+    valid_molecules_by_uid: dict,
     score_dict: dict,
     scored_sample_path: str = os.path.join(BASE_DIR, "all_scores_benchmark.json"),
     ) -> bool:
 
     try:
-        competition_payload = _build_competition_payload(config, start_block, end_block, target_proteins, antitarget_proteins)
+        competition_payload = _build_competition_payload(config, epoch, target_proteins, antitarget_proteins)
         competition_id = _insert_one('competitions', competition_payload)
         bt.logging.debug(f"Competition ID: {competition_id}")
 
