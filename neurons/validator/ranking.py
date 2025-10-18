@@ -31,8 +31,8 @@ def calculate_final_scores(
     
     # Go through each UID scored
     for uid, data in valid_molecules_by_uid.items():
-        targets = score_dict[uid]['target_scores']
-        antitargets = score_dict[uid]['antitarget_scores']
+        targets = score_dict[uid]['ps_target_scores']
+        antitargets = score_dict[uid]['ps_antitarget_scores']
         entropy = score_dict[uid]['entropy']
 
         # Replace None with -inf
@@ -67,7 +67,7 @@ def calculate_final_scores(
             combined_molecule_scores.append(mol_score)
         
         # Store all score lists in score_dict
-        score_dict[uid]['combined_molecule_scores'] = combined_molecule_scores
+        score_dict[uid]['ps_combined_molecule_scores'] = combined_molecule_scores
         score_dict[uid]['ps_final_score'] = np.mean(combined_molecule_scores)
                 
         # Log details

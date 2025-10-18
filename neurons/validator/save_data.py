@@ -86,35 +86,45 @@ def _insert_many(table_name: str, payloads: List[Dict[str, Any]]) -> List[int] |
 
 def _upsert_neurons_get_ids(neurons: list[dict]) -> list[tuple[int, str, str, int]]:
     """
-    rows: iterable of (uid, coldkey, hotkey)
-    returns: list of (uid, hotkey, coldkey, id) in the same order as input
+    Input:  [{'uid': int, 'coldkey': str, 'hotkey': str}, ...]
+    Output: [(uid, hotkey, coldkey, id), ...] in the same order as input
     """
-    conn, cursor = _connect_to_database()
-    data = [(n['uid'], n['coldkey'], n['hotkey'], i) for i, n in enumerate(neurons)]
-    if not data:
+    if not neurons:
         return []
+
+    data = [(int(n['uid']), str(n['coldkey']), str(n['hotkey']), i)
+            for i, n in enumerate(neurons)]
 
     sql = """
     WITH input(uid, coldkey, hotkey, ord) AS (
       VALUES %s
     ),
-    ins AS (
+    up AS (
       INSERT INTO public.neurons (uid, coldkey, hotkey)
       SELECT uid, coldkey, hotkey FROM input
-      ON CONFLICT (uid, hotkey) DO NOTHING
+      ON CONFLICT (uid, hotkey)
+      DO UPDATE SET coldkey = EXCLUDED.coldkey
       RETURNING id, uid, hotkey
     )
-    SELECT i.uid, i.hotkey, i.coldkey, n.id
+    SELECT
+      i.uid,
+      i.hotkey,
+      i.coldkey,
+      COALESCE(u.id, n.id) AS id
     FROM input i
-    JOIN public.neurons n
-      ON n.uid = i.uid AND n.hotkey = i.hotkey AND n.coldkey = i.coldkey
+    LEFT JOIN up u
+      ON u.uid = i.uid AND u.hotkey = i.hotkey
+    LEFT JOIN public.neurons n
+      ON n.uid = i.uid AND n.hotkey = i.hotkey
     ORDER BY i.ord;
     """
+
+    conn, _ = _connect_to_database()
     with conn.cursor() as cur:
-        execute_values(cur, sql, data, template="(%s,%s,%s,%s)")
-        out = cur.fetchall()  # [(uid, hotkey, coldkey, id), ...] aligned to input order
+        # execute_values will expand the VALUES (...) list
+        rows = execute_values(cur, sql, data, template="(%s,%s,%s,%s)", fetch=True) or []
     conn.commit()
-    return out
+    return rows
 
 def _pg_coerce(x: any) -> any:
     """Coerce numpy scalars and weird types to plain Python types for psycopg2."""
@@ -136,7 +146,6 @@ def _safe_num(x: float) -> float:
 def _build_competition_payload(config, epoch: int, target_proteins: list[str], antitarget_proteins: list[str]) -> dict:
     return {
         "epoch": epoch,
-        # start_block/end_block intentionally omitted; period is the sole timeline key
         "target_proteins": target_proteins,
         "antitarget_proteins": antitarget_proteins,
         "antitarget_weight": getattr(config, 'antitarget_weight', 1.0),
@@ -208,8 +217,8 @@ def _build_molecule_payload(
             "submission_id": submission_id,
             "name": names_list[idx],
             "smiles": smiles_list[idx],
-            "ps_target_scores": [ _safe_num(score) for score in ([t[idx] for t in targets] if targets else []) ],
-            "ps_antitarget_scores": [ _safe_num(score) for score in ([a[idx] for a in antitargets] if antitargets else []) ],
+            "ps_target_scores": psycopg2.extras.Json([ _safe_num(score) for score in ([t[idx] for t in targets] if targets else []) ]),
+            "ps_antitarget_scores": psycopg2.extras.Json([ _safe_num(score) for score in ([a[idx] for a in antitargets] if antitargets else []) ]),
             "ps_final_score": _safe_num(combined_scores[idx] if idx < len(combined_scores) else -math.inf),
         })
 
@@ -239,8 +248,8 @@ def _build_benchmark_payload(
     curve = {"mean": df['score'].mean(), 
             "stdv": df['score'].std(), 
             "histogram":
-                {"bounds": [0, 10],  # keep hardcoded for now, probably won't need to change until different scoring system
-                "frequencies": np.histogram(df['score'], bins=100, range=(0, 10))[0].tolist()}
+                {"bounds": [-10, 10],  # keep hardcoded for now, probably won't need to change until different scoring system
+                "frequencies": np.histogram(df['score'], bins=200, range=(-10, 10))[0].tolist()}
                 }
     
     benchmark = {
@@ -267,12 +276,12 @@ def _build_neurons_payload(
     return neurons
 
 def submit_epoch_results(
-    config,
+    config, 
     epoch: int,
     target_proteins: list[str],
     antitarget_proteins: list[str],
-    uid_to_data: dict,
-    valid_molecules_by_uid: dict,
+    uid_to_data: dict, 
+    valid_molecules_by_uid: dict, 
     score_dict: dict,
     scored_sample_path: str = os.path.join(BASE_DIR, "all_scores_benchmark.json"),
     ) -> bool:
@@ -302,12 +311,4 @@ def submit_epoch_results(
     except Exception as e:
         bt.logging.error(f"Error submitting epoch results: {e}")
         return False
-
-# if __name__ == "__main__":
-#     neuron_data = fetch_all('benchmark')
-#     print(neuron_data)
-#     print(type(neuron_data))
-
-
-
 
