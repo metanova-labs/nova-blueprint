@@ -40,9 +40,11 @@ class Miner:
     owner: str
     repo: str
     branch: str
+    hotkey: str
+    coldkey: Optional[str] = None
 
 
-def parse_commitment(raw: str, uid: int, block_number: int) -> Optional[Miner]:
+def parse_commitment(raw: str, uid: int, block_number: int, hotkey: str) -> Optional[Miner]:
     match = COMMITMENT_REGEX.match(raw.strip())
     if not match:
         return None
@@ -51,10 +53,10 @@ def parse_commitment(raw: str, uid: int, block_number: int) -> Optional[Miner]:
     branch = match.group("branch")
     if len(owner) == 0 or len(repo) == 0 or len(branch) == 0:
         return None
-    return Miner(uid=uid, block_number=block_number, raw=raw, owner=owner, repo=repo, branch=branch)
+    return Miner(uid=uid, block_number=block_number, raw=raw, owner=owner, repo=repo, branch=branch, hotkey=hotkey)
 
 
-async def fetch_commitments_from_chain(network: Optional[str], netuid: int, min_block: int, max_block: int) -> List[Tuple[int, int, str]]:
+async def fetch_commitments_from_chain(network: Optional[str], netuid: int, min_block: int, max_block: int) -> List[Tuple[int, int, str, str]]:
     """Fetch plaintext commitments within a block window (one per UID)."""
     subtensor = bt.async_subtensor(network=network)
     await subtensor.initialize()
@@ -68,9 +70,9 @@ async def fetch_commitments_from_chain(network: Optional[str], netuid: int, min_
         min_block=min_block,
         max_block=max_block,
     )
-    out: List[Tuple[int, int, str]] = []
+    out: List[Tuple[int, int, str, str]] = []
     for c in commits.values():
-        out.append((int(c.uid), int(c.block), str(c.data)))
+        out.append((int(c.uid), int(c.block), str(c.data), str(c.hotkey)))
     return out
 
 
@@ -78,7 +80,7 @@ def to_miners(commitments: Iterable[Miner]) -> List[Miner]:
     return list(commitments)
 
 
-def clone_repo(owner: str, repo: str, branch: str, work_root: Path) -> Tuple[Path, Optional[str]]:
+def clone_repo(owner: str, repo: str, branch: str, work_root: Path) -> Path:
     repo_url = f"https://github.com/{owner}/{repo}.git"
     target_dir = Path(tempfile.mkdtemp(prefix=f"{owner}-{repo}-", dir=str(work_root)))
 
@@ -106,9 +108,8 @@ def clone_repo(owner: str, repo: str, branch: str, work_root: Path) -> Tuple[Pat
         repo_url, str(target_dir)
     ], check=True)
 
-    completed = subprocess.run(["git", "-C", str(target_dir), "rev-parse", "HEAD"], check=True, capture_output=True, text=True)
-    sha = completed.stdout.strip()
-    return target_dir, sha
+    subprocess.run(["git", "-C", str(target_dir), "rev-parse", "HEAD"], check=True, capture_output=True, text=True)
+    return target_dir
 
 
 def ensure_miner_exists(repo_dir: Path) -> Path:
@@ -118,7 +119,7 @@ def ensure_miner_exists(repo_dir: Path) -> Path:
     return repo_dir
 
 
-def write_run_artifacts(runs_root: Path, period: str, miner: Miner, result_obj: Optional[Dict]) -> Optional[Path]:
+def write_run_artifacts(runs_root: Path, period: str, miner: Miner, result_obj: Optional[Dict]) -> None:
     if result_obj is None:
         return None
     results_dir = runs_root
@@ -126,6 +127,8 @@ def write_run_artifacts(runs_root: Path, period: str, miner: Miner, result_obj: 
 
     combined = {
         "uid": miner.uid,
+        "coldkey": miner.coldkey,
+        "hotkey": miner.hotkey,
         "block_number": miner.block_number,
         "owner": miner.owner,
         "repo": miner.repo,
@@ -138,7 +141,7 @@ def write_run_artifacts(runs_root: Path, period: str, miner: Miner, result_obj: 
         with out_file.open("a", encoding="utf-8") as agg:
             agg.write(json.dumps(combined, separators=(",", ":")) + "\n")
     except Exception as e:
-        print(f"[orchestrator] aggregate write failed for period {period}: {e}")
+        print(f"aggregate write failed for period {period}: {e}")
         raise
     return None
 
@@ -146,13 +149,12 @@ def write_run_artifacts(runs_root: Path, period: str, miner: Miner, result_obj: 
 def run_job(miner: Miner, runs_root: Path, work_root: Path, challenge_params: dict, period: str) -> None:
     started = time.time()
     repo_dir: Optional[Path] = None
-    commit_sha: Optional[str] = None
     result_obj: Optional[Dict] = None
     exit_code: Optional[int] = None
     reason_on_fail: Optional[str] = None
 
     try:
-        repo_dir, commit_sha = clone_repo(miner.owner, miner.repo, miner.branch, work_root)
+        repo_dir = clone_repo(miner.owner, miner.repo, miner.branch, work_root)
         miner_dir = ensure_miner_exists(repo_dir)
 
         runner.ensure_docker_image()
@@ -160,9 +162,9 @@ def run_job(miner: Miner, runs_root: Path, work_root: Path, challenge_params: di
         safe_repo = f"{miner.owner}_{miner.repo}".replace("/", "_")
         dest = work_root / f"{period}_{safe_repo}_{miner.uid}"
         workdir, outdir = runner.prepare_workdir(miner_dir, challenge_params, dest_dir=dest)
-        print(f"[orchestrator] cloning/running {miner.owner}/{miner.repo}@{miner.branch} uid={miner.uid} workdir={workdir}")
+        print(f"cloning/running {miner.owner}/{miner.repo}@{miner.branch} uid={miner.uid} workdir={workdir}")
         code, output = runner.run_container(workdir, outdir)
-        print(f"[orchestrator] run finished uid={miner.uid} exit={code} log={outdir / 'log.txt'} result={outdir / 'result.json'}")
+        print(f"run finished uid={miner.uid} exit={code} log={outdir / 'log.txt'} result={outdir / 'result.json'}")
         exit_code = code
         try:
             with open(outdir / "result.json", "r", encoding="utf-8") as f:
@@ -176,7 +178,7 @@ def run_job(miner: Miner, runs_root: Path, work_root: Path, challenge_params: di
 
     except Exception as e:
         reason_on_fail = f"exception: {type(e).__name__}: {e}"
-        print(f"[orchestrator] run failed uid={miner.uid}: {type(e).__name__}: {e}")
+        print(f"run failed uid={miner.uid}: {type(e).__name__}: {e}")
     finally:
         if repo_dir is not None:
             try:
@@ -184,17 +186,17 @@ def run_job(miner: Miner, runs_root: Path, work_root: Path, challenge_params: di
             except Exception:
                 pass
         try:
-            print(f"[orchestrator] finished uid={miner.uid} workdir={workdir if 'workdir' in locals() else 'n/a'}")
+            print(f"finished uid={miner.uid} workdir={workdir if 'workdir' in locals() else 'n/a'}")
         except Exception:
             pass
 
     write_run_artifacts(runs_root, period, miner, result_obj)
 
 
-def gather_parse_and_schedule(commit_triplets: Iterable[Tuple[int, int, str]]) -> List[Miner]:
+def gather_parse_and_schedule(commit_quads: Iterable[Tuple[int, int, str, str]]) -> List[Miner]:
     parsed: List[Miner] = []
-    for uid, block_number, raw in commit_triplets:
-        c = parse_commitment(raw, uid, block_number)
+    for uid, block_number, raw, hotkey in commit_quads:
+        c = parse_commitment(raw, uid, block_number, hotkey)
         if c is not None:
             parsed.append(c)
     miners = to_miners(parsed)
@@ -223,10 +225,20 @@ async def main() -> int:
 
     submissions = await fetch_commitments_from_chain(network=network, netuid=netuid, min_block=min_block, max_block=max_block)
     miners = gather_parse_and_schedule(submissions)
-    print(f"[orchestrator] current_block={current_block} submissions={len(submissions)} miners={len(miners)}")
+    print(f"current_block={current_block} submissions={len(submissions)} miners={len(miners)}")
 
     block_hash = await subtensor.determine_block_hash(current_block)
     challenge_params = build_challenge_params(str(block_hash))
+
+    try:
+        metagraph = await subtensor.metagraph(netuid)
+        coldkeys = getattr(metagraph, 'coldkeys', None)
+        if coldkeys is not None:
+            for miner in miners:
+                if isinstance(miner.uid, int) and 0 <= miner.uid < len(coldkeys):
+                    miner.coldkey = coldkeys[miner.uid]
+    except Exception as e:
+        print(f"failed to populate coldkeys: {type(e).__name__}: {e}")
     for miner in miners:
         run_job(miner, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
 
