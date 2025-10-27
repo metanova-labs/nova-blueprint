@@ -141,7 +141,7 @@ def write_run_artifacts(runs_root: Path, period: str, miner: Miner, result_obj: 
         with out_file.open("a", encoding="utf-8") as agg:
             agg.write(json.dumps(combined, separators=(",", ":")) + "\n")
     except Exception as e:
-        print(f"aggregate write failed for period {period}: {e}")
+        bt.logging.error(f"aggregate write failed for period {period}: {e}")
         raise
     return None
 
@@ -162,9 +162,9 @@ def run_job(miner: Miner, runs_root: Path, work_root: Path, challenge_params: di
         safe_repo = f"{miner.owner}_{miner.repo}".replace("/", "_")
         dest = work_root / f"{period}_{safe_repo}_{miner.uid}"
         workdir, outdir = runner.prepare_workdir(miner_dir, challenge_params, dest_dir=dest)
-        print(f"cloning/running {miner.owner}/{miner.repo}@{miner.branch} uid={miner.uid} workdir={workdir}")
+        bt.logging.info(f"cloning/running {miner.owner}/{miner.repo}@{miner.branch} uid={miner.uid} workdir={workdir}")
         code, output = runner.run_container(workdir, outdir)
-        print(f"run finished uid={miner.uid} exit={code} log={outdir / 'log.txt'} result={outdir / 'result.json'}")
+        bt.logging.info(f"run finished uid={miner.uid} exit={code} log={outdir / 'log.txt'} result={outdir / 'result.json'}")
         exit_code = code
         try:
             with open(outdir / "result.json", "r", encoding="utf-8") as f:
@@ -178,7 +178,7 @@ def run_job(miner: Miner, runs_root: Path, work_root: Path, challenge_params: di
 
     except Exception as e:
         reason_on_fail = f"exception: {type(e).__name__}: {e}"
-        print(f"run failed uid={miner.uid}: {type(e).__name__}: {e}")
+        bt.logging.error(f"run failed uid={miner.uid}: {type(e).__name__}: {e}")
     finally:
         if repo_dir is not None:
             try:
@@ -186,7 +186,7 @@ def run_job(miner: Miner, runs_root: Path, work_root: Path, challenge_params: di
             except Exception:
                 pass
         try:
-            print(f"finished uid={miner.uid} workdir={workdir if 'workdir' in locals() else 'n/a'}")
+            bt.logging.info(f"finished uid={miner.uid} workdir={workdir if 'workdir' in locals() else 'n/a'}")
         except Exception:
             pass
 
@@ -225,7 +225,7 @@ async def main() -> int:
 
     submissions = await fetch_commitments_from_chain(network=network, netuid=netuid, min_block=min_block, max_block=max_block)
     miners = gather_parse_and_schedule(submissions)
-    print(f"current_block={current_block} submissions={len(submissions)} miners={len(miners)}")
+    bt.logging.info(f"current_block={current_block} submissions={len(submissions)} miners={len(miners)}")
 
     block_hash = await subtensor.determine_block_hash(current_block)
     challenge_params = build_challenge_params(str(block_hash))
@@ -238,7 +238,7 @@ async def main() -> int:
                 if isinstance(miner.uid, int) and 0 <= miner.uid < len(coldkeys):
                     miner.coldkey = coldkeys[miner.uid]
     except Exception as e:
-        print(f"failed to populate coldkeys: {type(e).__name__}: {e}")
+        bt.logging.error(f"failed to populate coldkeys: {type(e).__name__}: {e}")
     for miner in miners:
         run_job(miner, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
 
@@ -265,7 +265,7 @@ async def main() -> int:
 
         await scoring_module.process_epoch(cfg, period, uid_to_data)
     except Exception as e:
-        print(f"[validator] scoring step failed: {e}")
+        bt.logging.error(f"scoring step failed: {e}")
 
     return 0
 

@@ -8,6 +8,7 @@ from typing import Tuple, Optional
 import threading
 
 from config.config_loader import load_time_budget_sec  
+import bittensor as bt
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -19,7 +20,7 @@ def ensure_docker_image() -> None:
     try:
         subprocess.run(["docker", "image", "inspect", SANDBOX_IMAGE_TAG], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except subprocess.CalledProcessError:
-        print(f"Building Docker image {SANDBOX_IMAGE_TAG}...")
+        bt.logging.info(f"Building Docker image {SANDBOX_IMAGE_TAG}...")
         subprocess.run(["docker", "build", "-t", SANDBOX_IMAGE_TAG, "-f", str(PROJECT_ROOT / "sandbox" / "Dockerfile"), str(PROJECT_ROOT.parent)], check=True)
 
 
@@ -65,38 +66,38 @@ def prepare_workdir(source_dir: Path, challenge_params: dict, dest_dir: Optional
             try:
                 os.chmod(root, 0o755)
             except Exception as e:
-                print(f"[runner] chmod dir failed {root}: {e}")
+                bt.logging.warning(f"chmod dir failed {root}: {e}")
             for d in dirs:
                 p = os.path.join(root, d)
                 try:
                     os.chmod(p, 0o755)
                 except Exception as e:
-                    print(f"[runner] chmod dir failed {p}: {e}")
+                    bt.logging.warning(f"chmod dir failed {p}: {e}")
             for f in files:
                 p = os.path.join(root, f)
                 try:
                     os.chmod(p, 0o644)
                 except Exception as e:
-                    print(f"[runner] chmod file failed {p}: {e}")
+                    bt.logging.warning(f"chmod file failed {p}: {e}")
         try:
             st = os.stat(outdir)
-            print(f"[runner] outdir perms set to {oct(st.st_mode & 0o777)} owner={st.st_uid} group={st.st_gid} path={outdir}")
+            bt.logging.info(f"outdir perms set to {oct(st.st_mode & 0o777)} owner={st.st_uid} group={st.st_gid} path={outdir}")
         except Exception as e:
-            print(f"[runner] stat outdir failed: {e}")
+            bt.logging.warning(f"stat outdir failed: {e}")
     except Exception as e:
-        print(f"[runner] chmod outdir/workdir failed: {e}")
+        bt.logging.error(f"chmod outdir/workdir failed: {e}")
 
     try:
         res = subprocess.run(["setfacl", "-m", "u:10001:rwx", str(outdir)], capture_output=True, text=True)
         if res.returncode == 0:
-            print(f"[runner] setfacl applied on {outdir} for uid 10001")
+            bt.logging.info(f"setfacl applied on {outdir} for uid 10001")
         else:
             stderr = (res.stderr or "").strip()
-            print(f"[runner] setfacl failed rc={res.returncode} on {outdir}: {stderr}")
+            bt.logging.warning(f"setfacl failed rc={res.returncode} on {outdir}: {stderr}")
     except FileNotFoundError:
-        print("[runner] setfacl not found; ACL step skipped")
+        bt.logging.info("setfacl not found; ACL step skipped")
     except Exception as e:
-        print(f"[runner] setfacl error: {e}")
+        bt.logging.error(f"setfacl error: {e}")
 
     return workdir, outdir
 
