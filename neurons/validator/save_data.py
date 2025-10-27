@@ -107,7 +107,7 @@ def _upsert_neurons_get_ids(neurons: list[dict]) -> list[tuple[int, str, str, in
     SELECT i.uid, i.hotkey, i.coldkey, n.id
     FROM input i
     JOIN public.neurons n
-      ON n.uid = i.uid AND n.hotkey = i.hotkey AND n.coldkey = i.coldkey
+      ON n.uid = i.uid AND n.hotkey = i.hotkey
     ORDER BY i.ord;
     """
     with conn.cursor() as cur:

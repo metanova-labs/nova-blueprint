@@ -259,6 +259,8 @@ async def main() -> int:
                     uid_to_data[uid] = {
                         "molecules": molecules,
                         "github_data": rec.get("raw"),
+                        "hotkey": rec.get("hotkey"),
+                        "coldkey": rec.get("coldkey"),
                     }
         cfg = dict(challenge_params.get("config", {}))
         cfg.update(challenge_params.get("challenge", {}))
