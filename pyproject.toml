@@ -1,0 +1,20 @@
+[project]
+name = "nova-blueprint"
+version = "0.0.1"
+requires-python = ">=3.12"
+
+dependencies = [
+  "python-dotenv==1.0.1",
+  "requests>=2.32.4",
+  "bittensor==9.9.0",
+  "substrate-interface==1.7.11",
+  "datasets==3.3.2",
+  "huggingface-hub==0.29.1",
+  "pandas==2.2.3",
+  "biopython==1.85",
+  "lifelines==0.30.0",
+  "rdkit==2024.9.4",
+  "scikit-learn==1.6.1",
+  "fair-esm==2.0.0",
+  "psycopg2-binary==2.9.9",
+]
