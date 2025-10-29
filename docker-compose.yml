@@ -7,11 +7,10 @@ services:
     restart: "no"
     working_dir: /app
     gpus: all
-    volumes:
-      - ./:/app:rw
-      - ${BT_WALLETS_DIR:-$HOME/.bittensor/wallets}:/wallets:ro
-      - /var/run/docker.sock:/var/run/docker.sock
     env_file:
       - .env
-    command: ["python", "neurons/validator/validator.py", "--logging.debug"]
+    volumes:
+      - ${BT_WALLETS_DIR:-$HOME/.bittensor/wallets}:/wallets:ro
+      - ./results:/app/results
+    command: ["python", "neurons/validator/validator.py", "--logging.info"]
 

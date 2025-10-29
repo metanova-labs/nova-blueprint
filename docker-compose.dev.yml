@@ -1,0 +1,20 @@
+name: nova-blueprint-dev
+
+services:
+  nova-blueprint:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    image: nova-blueprint:dev
+    container_name: nova-blueprint-dev
+    restart: "no"
+    working_dir: /app
+    gpus: all
+    volumes:
+      - ./:/app:rw
+      - ${BT_WALLETS_DIR:-$HOME/.bittensor/wallets}:/wallets:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file:
+      - .env
+    command: ["python", "neurons/validator/validator.py", "--logging.debug"]
