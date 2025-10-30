@@ -2,15 +2,25 @@ name: nova-blueprint
 
 services:
   nova-blueprint:
-    image: ${VALIDATOR_IMAGE:-shadeform/nova-blueprint:latest}
+    image: ${VALIDATOR_IMAGE:-urdof7/nova-blueprint:latest}
     container_name: nova-blueprint
     restart: "no"
     working_dir: /app
     gpus: all
     env_file:
       - .env
+    environment:
+      - PYTHONPATH=/app
     volumes:
       - ${BT_WALLETS_DIR:-$HOME/.bittensor/wallets}:/wallets:ro
       - ./results:/app/results
     command: ["python", "neurons/validator/validator.py", "--logging.info"]
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: nova-blueprint-watchtower
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["--interval", "300", "--cleanup", "nova-blueprint"]
 
