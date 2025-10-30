@@ -19,6 +19,24 @@ def _next_aligned_ts(now_ts: float, interval: int) -> float:
     return (k + 1) * interval
 
 
+def _format_duration_hms(total_seconds: int) -> str:
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+    parts = []
+    if hours:
+        parts.append(f"{hours}h")
+    if minutes or hours:
+        parts.append(f"{minutes}m")
+    parts.append(f"{seconds}s")
+    return " ".join(parts)
+
+
+def _format_utc(ts: float) -> str:
+    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+    return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
 def run_competition() -> int:
     start = time.perf_counter()
     cp = subprocess.run([
@@ -54,8 +72,8 @@ def main() -> None:
         now_ts = time.time()
         next_ts = _next_aligned_ts(now_ts, interval)
         wait_s = max(0, int(next_ts - now_ts))
-        next_iso = datetime.fromtimestamp(next_ts, tz=timezone.utc).isoformat()
-        bt.logging.info(f"next run at {next_iso} (in {wait_s}s)")
+        next_utc = _format_utc(next_ts)
+        bt.logging.info(f"next run at {next_utc} (in {_format_duration_hms(wait_s)})")
         time.sleep(wait_s)
         bt.logging.info("running competition…")
         run_competition()
