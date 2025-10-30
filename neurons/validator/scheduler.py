@@ -2,6 +2,7 @@ import time
 import subprocess
 from datetime import datetime, timezone
 import asyncio
+import signal
 
 import bittensor as bt
 from config.config_loader import load_config
@@ -37,15 +38,34 @@ def _format_utc(ts: float) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
 
-def run_competition() -> int:
+def run_competition(immediate_exit_requested: dict, current_proc: dict) -> int:
     start = time.perf_counter()
-    cp = subprocess.run([
+    proc = subprocess.Popen([
         "python",
         "neurons/validator/validator.py",
-    ], check=False)
+    ])
+    current_proc["proc"] = proc
+    rc: int
+    while True:
+        try:
+            rc = proc.wait(timeout=1)
+            break
+        except subprocess.TimeoutExpired:
+            if immediate_exit_requested.get("flag"):
+                bt.logging.info("immediate shutdown requested: terminating validator…")
+                try:
+                    proc.terminate()
+                    rc = proc.wait(timeout=15)
+                    break
+                except subprocess.TimeoutExpired:
+                    bt.logging.info("validator did not exit after SIGTERM, killing…")
+                    proc.kill()
+                    rc = -9
+                    break
+    current_proc["proc"] = None
     dur = time.perf_counter() - start
-    bt.logging.info(f"competition finished rc={cp.returncode} in {dur:.1f}s")
-    return cp.returncode
+    bt.logging.info(f"competition finished rc={rc} in {dur:.1f}s")
+    return rc
 
 
 def setup_and_check_registration():
@@ -66,6 +86,29 @@ def main() -> None:
     # one-time setup and registration check
     setup_and_check_registration()
 
+    # graceful shutdown flags
+    termination_requested = {"flag": False}  # graceful: SIGTERM (Watchtower)
+    immediate_exit_requested = {"flag": False}  # immediate: SIGINT (Ctrl+C)
+    is_running = {"flag": False}
+    current_proc = {"proc": None}
+
+    def _handle_term(signum, frame):
+        termination_requested["flag"] = True
+        if is_running["flag"]:
+            bt.logging.info("SIGTERM: will stop after current run finishes")
+        else:
+            bt.logging.info("SIGTERM: idle, exiting now")
+
+    def _handle_int(signum, frame):
+        immediate_exit_requested["flag"] = True
+        if is_running["flag"] and current_proc["proc"] is not None:
+            bt.logging.info("SIGINT: user interrupt, will abort current run")
+        else:
+            bt.logging.info("SIGINT: idle, exiting now")
+
+    signal.signal(signal.SIGTERM, _handle_term)
+    signal.signal(signal.SIGINT, _handle_int)
+
     interval = _get_interval_seconds()
     bt.logging.info(f"scheduler started (interval={interval}s)")
     while True:
@@ -74,9 +117,41 @@ def main() -> None:
         wait_s = max(0, int(next_ts - now_ts))
         next_utc = _format_utc(next_ts)
         bt.logging.info(f"next run at {next_utc} (in {_format_duration_hms(wait_s)})")
-        time.sleep(wait_s)
+
+        # Sleep in small chunks to react to termination requests quickly
+        while True:
+            if termination_requested["flag"] and not is_running["flag"]:
+                bt.logging.info("graceful shutdown: idle, exiting for update (SIGTERM)")
+                return
+            if immediate_exit_requested["flag"] and not is_running["flag"]:
+                bt.logging.info("immediate shutdown: idle, exiting now (SIGINT)")
+                return
+            now = time.time()
+            if now >= next_ts:
+                break
+            time.sleep(min(1.0, next_ts - now))
+
+        if termination_requested["flag"] or immediate_exit_requested["flag"]:
+            if termination_requested["flag"]:
+                bt.logging.info("graceful shutdown: exiting before run start (SIGTERM)")
+            else:
+                bt.logging.info("immediate shutdown: user interrupt before run start (SIGINT)")
+            # Received termination during wait; exit before starting a run
+            return
+
         bt.logging.info("running competition…")
-        run_competition()
+        is_running["flag"] = True
+        try:
+            run_competition(immediate_exit_requested, current_proc)
+        finally:
+            is_running["flag"] = False
+        if termination_requested["flag"] or immediate_exit_requested["flag"]:
+            if termination_requested["flag"]:
+                bt.logging.info("Completed run, exiting for update (SIGTERM)")
+            else:
+                bt.logging.info("immediate shutdown: aborted or completed run on user interrupt (SIGINT)")
+            # Exit immediately after finishing current run
+            return
 
 
 if __name__ == "__main__":

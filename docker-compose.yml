@@ -7,6 +7,8 @@ services:
     restart: "no"
     working_dir: /app
     gpus: all
+    init: true
+    stop_grace_period: 24h
     env_file:
       - .env
     environment:
@@ -23,5 +25,5 @@ services:
     restart: always
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    command: ["--interval", "300", "--cleanup", "nova-blueprint"]
+    command: ["--interval", "300", "--cleanup", "--stop-timeout", "24h", "nova-blueprint"]
 

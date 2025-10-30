@@ -11,6 +11,8 @@ services:
     restart: "no"
     working_dir: /app
     gpus: all
+    init: true
+    stop_grace_period: 24h
     environment:
       - PYTHONPATH=/app
     volumes:
