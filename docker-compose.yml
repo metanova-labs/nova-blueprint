@@ -12,9 +12,10 @@ services:
     environment:
       - PYTHONPATH=/app
     volumes:
-      - ${BT_WALLETS_DIR:-$HOME/.bittensor/wallets}:/wallets:ro
+      - ${BT_WALLETS_DIR:-$HOME/.bittensor/wallets}:/root/.bittensor/wallets:ro
       - ./results:/app/results
-    command: ["python", "neurons/validator/validator.py", "--logging.info"]
+    entrypoint: ["python", "neurons/validator/scheduler.py"]
+    command: ["--wallet.name", "${BT_WALLET_COLD}", "--wallet.hotkey", "${BT_WALLET_HOT}", "--logging.debug"]
 
   watchtower:
     image: containrrr/watchtower:latest
