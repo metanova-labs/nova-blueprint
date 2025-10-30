@@ -39,8 +39,8 @@ def setup_logging(config):
     Configures Bittensor logging to write logs to a file named `validator.log` 
     in the same directory as this Python file
     """
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    bt.logging(config=config, logging_dir=script_dir, record_log=True)
+    # script_dir = os.path.dirname(os.path.abspath(__file__))
+    # bt.logging(config=config, logging_dir=script_dir, record_log=True)
 
     bt.logging.info(f"Running validator for subnet: {config.netuid} on network: {config.subtensor.network} with config:")
     bt.logging.info(config)
