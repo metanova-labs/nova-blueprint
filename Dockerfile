@@ -37,5 +37,5 @@ WORKDIR /app
 FROM base AS final
 WORKDIR /app
 COPY . /app
-CMD ["python", "neurons/validator/validator.py", "--logging.info"]
+CMD ["python", "neurons/validator/scheduler.py"]
 

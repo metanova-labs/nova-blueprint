@@ -21,7 +21,10 @@ reaction_filtering:
   random_valid_reaction: true  # true = one random reaction per epoch, false = all reactions valid
 
 run:
-  time_budget_sec: 300
+  time_budget_sec: 150
   period_duration: 7200
+
+# Run cadence: one competition every day (UTC-aligned)
+competition_interval_seconds: 86400
 
 
