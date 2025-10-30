@@ -31,6 +31,9 @@ def load_config(path: str = os.path.join(BASE_DIR, "config/config.yaml")):
     # Run parameters
     run_cfg = config.get("run", {})
     time_budget_sec = int(run_cfg.get("time_budget_sec", 600))
+    competition_interval_seconds = run_cfg.get("competition_interval_seconds")
+    if competition_interval_seconds is not None:
+        competition_interval_seconds = int(competition_interval_seconds)
 
     return {
         'num_antitargets': num_antitargets,
@@ -42,6 +45,7 @@ def load_config(path: str = os.path.join(BASE_DIR, "config/config.yaml")):
         'entropy_min_threshold': entropy_min_threshold,
         'random_valid_reaction': random_valid_reaction,
         'time_budget_sec': time_budget_sec,
+        'competition_interval_seconds': competition_interval_seconds,
     }
 
 
