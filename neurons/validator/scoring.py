@@ -40,7 +40,7 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict):
         antitarget_sequences = config["antitarget_sequences"]
         allowed_reaction = config.get("allowed_reaction")
 
-        target_codes = ['Q13547'] #[get_code_from_protein_sequence(sequence) for sequence in target_sequences]
+        target_codes = [get_code_from_protein_sequence(sequence) for sequence in target_sequences]
         antitarget_codes = [get_code_from_protein_sequence(sequence) for sequence in antitarget_sequences]
 
         config["target_codes"] = target_codes
