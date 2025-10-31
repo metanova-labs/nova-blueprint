@@ -7,6 +7,7 @@ import os
 import json
 from typing import List, Dict
 import asyncio
+import traceback
 
 import pandas as pd
 import bittensor as bt
@@ -27,20 +28,19 @@ from neurons.validator.save_data import submit_epoch_results
 # Global variable to store PSICHIC instance - will be set by validator.py
 psichic = None
 
-async def process_epoch(config, epoch: int, uid_to_data: dict):
+async def process_epoch(config, epoch_number: int, uid_to_data: dict):
     """
     Process a single epoch end-to-end.
     """
     global psichic
     try:
-        current_epoch = epoch
         
         # get target and antitarget sequences from config
         target_sequences = config["target_sequences"]
         antitarget_sequences = config["antitarget_sequences"]
         allowed_reaction = config.get("allowed_reaction")
 
-        target_codes = [get_code_from_protein_sequence(sequence) for sequence in target_sequences]
+        target_codes = ['Q13547'] #[get_code_from_protein_sequence(sequence) for sequence in target_sequences]
         antitarget_codes = [get_code_from_protein_sequence(sequence) for sequence in antitarget_sequences]
 
         config["target_codes"] = target_codes
@@ -58,10 +58,10 @@ async def process_epoch(config, epoch: int, uid_to_data: dict):
         # Initialize scoring structure
         score_dict = {
             uid: {
-                "target_scores": [[] for _ in range(len(target_codes))],
-                "antitarget_scores": [[] for _ in range(len(antitarget_codes))],
+                "ps_target_scores": [[] for _ in range(len(target_codes))],
+                "ps_antitarget_scores": [[] for _ in range(len(antitarget_codes))],
                 "entropy": None,
-                "github_data": uid_to_data[uid].get("github_data", None)
+                "github_data": uid_to_data[uid].get("raw", None)
             }
             for uid in uid_to_data
         }
@@ -91,11 +91,11 @@ async def process_epoch(config, epoch: int, uid_to_data: dict):
 
         # Calculate final scores
         score_dict = calculate_final_scores(
-            score_dict, valid_molecules_by_uid, config, current_epoch
+            score_dict, valid_molecules_by_uid, config, epoch_number
         )
 
         # Determine winner
-        winner = determine_winner(score_dict, current_epoch)
+        winner = determine_winner(score_dict, epoch_number)
 
         # Yield so ws heartbeats can run before the next RPC
         await asyncio.sleep(0)
@@ -104,9 +104,12 @@ async def process_epoch(config, epoch: int, uid_to_data: dict):
         try:
             submit_url = os.environ.get('SUBMIT_RESULTS_URL')
             if submit_url:
+                # Dump winner scored output to file
+                #with open(os.path.join(BASE_DIR, f"winner_scores_{epoch_number}.json"), "w") as f:
+                #    json.dump(score_dict[winner], f, ensure_ascii=False, indent=2)
                 status = submit_epoch_results(
                     config=config,
-                    epoch=current_epoch,
+                    epoch_number=epoch_number,
                     target_proteins=target_codes,
                     antitarget_proteins=antitarget_codes,
                     uid_to_data=uid_to_data,
@@ -141,6 +144,7 @@ async def process_epoch(config, epoch: int, uid_to_data: dict):
 
     except Exception as e:
         bt.logging.error(f"Error processing epoch: {e}")
+        traceback.print_exc()
         return None
 
 def score_all_proteins_psichic(
@@ -202,7 +206,7 @@ def score_all_proteins_psichic(
                     num_molecules = len(valid_molecules_by_uid.get(uid, {}).get('smiles', []))
                     if num_molecules == 0 and uid_to_data:
                         num_molecules = len(uid_to_data.get(uid, {}).get("molecules", []))
-                    score_dict[uid]["target_scores" if is_target else "antitarget_scores"][col_idx] = [-math.inf] * num_molecules
+                    score_dict[uid]["ps_target_scores" if is_target else "ps_antitarget_scores"][col_idx] = [-math.inf] * num_molecules
                 continue
         
         # Collect all unique molecules across all UIDs
@@ -214,7 +218,7 @@ def score_all_proteins_psichic(
                 num_molecules = 0
                 if uid_to_data:
                     num_molecules = len(uid_to_data.get(uid, {}).get("molecules", []))
-                score_dict[uid]["target_scores" if is_target else "antitarget_scores"][col_idx] = [-math.inf] * num_molecules
+                score_dict[uid]["ps_target_scores" if is_target else "ps_antitarget_scores"][col_idx] = [-math.inf] * num_molecules
                 continue
             
             for mol_idx, smiles in enumerate(valid_molecules['smiles']):
@@ -259,9 +263,9 @@ def score_all_proteins_psichic(
                 uid_scores.append(score)
             
             if is_target:
-                score_dict[uid]["target_scores"][col_idx] = uid_scores
+                score_dict[uid]["ps_target_scores"][col_idx] = uid_scores
             else:
-                score_dict[uid]["antitarget_scores"][col_idx] = uid_scores
+                score_dict[uid]["ps_antitarget_scores"][col_idx] = uid_scores
         
         bt.logging.info(f"Completed scoring for protein {protein}: {len(unique_molecules)} unique molecules")
 
@@ -316,9 +320,9 @@ def read_miner_output_from_json(path: str) -> pd.DataFrame:
 
     # Every other miner will have a "uid" field
     uid_to_data = {item["uid"]: {"molecules": item["result"]["molecules"], 
-        "github_data": item["raw"],
-        "coldkey": item["coldkey"],
-        "hotkey": item["hotkey"]} 
+        "github_data": item.get("raw", None),
+        "coldkey": item.get("coldkey", None),
+        "hotkey": item.get("hotkey", None)} 
         for item in data
         }
 
@@ -347,8 +351,8 @@ def score_molecules_json(
     # Initialize scoring structure
     score_dict = {
         uid: {
-            "target_scores": [[] for _ in range(len(target_proteins))],
-            "antitarget_scores": [[] for _ in range(len(antitarget_proteins))],
+            "ps_target_scores": [[] for _ in range(len(target_proteins))],
+            "ps_antitarget_scores": [[] for _ in range(len(antitarget_proteins))],
             "entropy": None,
         }
         for uid in uid_to_data
@@ -372,10 +376,5 @@ def score_molecules_json(
 
     return score_dict
 
-def calculate_histogram(score_list: list[float]) -> np.array:
-    """
-    Calculate the histogram of a list of scores.
-    """
-    return np.histogram(score_list, bins=100, range=(0, 10))
 
 
