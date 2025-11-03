@@ -13,15 +13,16 @@ import bittensor as bt
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-SANDBOX_IMAGE_TAG = "miner-sandbox:dev"
+SANDBOX_IMAGE_TAG = "urdof7/miner-sandbox:latest"
 
 
 def ensure_docker_image() -> None:
     try:
-        subprocess.run(["docker", "image", "inspect", SANDBOX_IMAGE_TAG], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except subprocess.CalledProcessError:
-        bt.logging.info(f"Building Docker image {SANDBOX_IMAGE_TAG}...")
-        subprocess.run(["docker", "build", "-t", SANDBOX_IMAGE_TAG, "-f", str(PROJECT_ROOT / "sandbox" / "Dockerfile"), str(PROJECT_ROOT.parent)], check=True)
+        bt.logging.info(f"Pulling Docker image {SANDBOX_IMAGE_TAG}…")
+        subprocess.run(["docker", "pull", SANDBOX_IMAGE_TAG], check=True)
+    except subprocess.CalledProcessError as e:
+        bt.logging.warning(f"Pull failed for {SANDBOX_IMAGE_TAG}: {e}. Using local image if available.")
+        subprocess.run(["docker", "image", "inspect", SANDBOX_IMAGE_TAG], check=True)
 
 
 def prepare_workdir(source_dir: Path, challenge_params: dict, dest_dir: Optional[Path] = None) -> Tuple[Path, Path]:
