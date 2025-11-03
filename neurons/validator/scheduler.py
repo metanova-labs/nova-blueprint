@@ -7,6 +7,7 @@ import json
 import os
 import threading
 from pathlib import Path
+import argparse
 import bittensor as bt
 from config.config_loader import load_config
 from neurons.validator.setup import get_config, setup_logging, check_registration
@@ -53,9 +54,7 @@ def _weights_loop(stop_event: threading.Event, cfg) -> None:
     try:
         interval_s = 1800  # 30 minutes
 
-        project_root = Path(__file__).resolve().parents[2]
-        results_dir = project_root / "results"
-        winner_path = results_dir / "winner.json"
+        winner_path = Path("/data/results/winner.json")
 
         bt.logging.info(f"weights: thread started (interval={interval_s}s)")
         next_ts = time.time() + interval_s
@@ -85,6 +84,7 @@ def run_competition(immediate_exit_requested: dict, current_proc: dict) -> int:
     proc = subprocess.Popen([
         "python",
         "neurons/validator/validator.py",
+        "--logging.debug",
     ])
     current_proc["proc"] = proc
     rc: int
@@ -125,6 +125,9 @@ def setup_and_check_registration():
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Validator scheduler")
+    parser.add_argument("--test_mode", action="store_true", help="Trigger first run quickly for debugging")
+    args = parser.parse_args()
     # one-time setup and registration check
     cfg = setup_and_check_registration()
 
@@ -160,9 +163,16 @@ def main() -> None:
 
     interval = _get_interval_seconds()
     bt.logging.info(f"scheduler started (interval={interval}s)")
+    # Test mode: one-time initial delay to trigger first run quickly for debugging
+    _first_cycle = bool(args.test_mode)
+    _initial_delay_seconds = 10
     while True:
         now_ts = time.time()
         next_ts = _next_aligned_ts(now_ts, interval)
+        if _first_cycle:
+            next_ts = now_ts + _initial_delay_seconds
+            _first_cycle = False
+            bt.logging.info(f"test_mode: first run in {_format_duration_hms(int(_initial_delay_seconds))} (overrides alignment)")
         wait_s = max(0, int(next_ts - now_ts))
         next_utc = _format_utc(next_ts)
         bt.logging.info(f"next run at {next_utc} (in {_format_duration_hms(wait_s)})")
