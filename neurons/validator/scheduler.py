@@ -79,13 +79,15 @@ def _weights_loop(stop_event: threading.Event, cfg) -> None:
     except Exception as e:
         bt.logging.error(f"weights: thread crashed: {type(e).__name__}: {e}")
 
-def run_competition(immediate_exit_requested: dict, current_proc: dict) -> int:
+def run_competition(immediate_exit_requested: dict, current_proc: dict, extra_args: list[str] | None = None) -> int:
     start = time.perf_counter()
-    proc = subprocess.Popen([
+    cmd = [
         "python",
         "neurons/validator/validator.py",
-        "--logging.debug",
-    ])
+    ]
+    if extra_args:
+        cmd.extend(extra_args)
+    proc = subprocess.Popen(cmd)
     current_proc["proc"] = proc
     rc: int
     while True:
@@ -127,7 +129,7 @@ def setup_and_check_registration():
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validator scheduler")
     parser.add_argument("--test_mode", action="store_true", help="Trigger first run quickly for debugging")
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
     # one-time setup and registration check
     cfg = setup_and_check_registration()
 
@@ -201,7 +203,7 @@ def main() -> None:
         bt.logging.info("running competition…")
         is_running["flag"] = True
         try:
-            run_competition(immediate_exit_requested, current_proc)
+            run_competition(immediate_exit_requested, current_proc, extra_args=unknown)
         finally:
             is_running["flag"] = False
         if termination_requested["flag"] or immediate_exit_requested["flag"]:
