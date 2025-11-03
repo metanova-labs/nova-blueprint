@@ -55,8 +55,3 @@ def load_time_budget_sec(path: str = os.path.join(BASE_DIR, "config/config.yaml"
         return int(yaml.safe_load(f)["run"]["time_budget_sec"]) 
 
 
-def load_period_duration(path: str = os.path.join(BASE_DIR, "config/config.yaml")) -> int:
-    """Fast path to read only period_duration as an int (blocks)."""
-    with open(path, "r", encoding="utf-8") as f:
-        return int(yaml.safe_load(f)["run"].get("period_duration", 7200))
-

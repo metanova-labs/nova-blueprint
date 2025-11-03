@@ -22,7 +22,6 @@ reaction_filtering:
 
 run:
   time_budget_sec: 150
-  period_duration: 7200
   # One competition every day (UTC-aligned). Change to e.g. 39600 for 11h.
   competition_interval_seconds: 86400
 
