@@ -9,14 +9,125 @@ from tqdm import tqdm
 
 import sys
 
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+PARENT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(PARENT_DIR)
 
-from miner_utils import validate_molecules_sampler
-from nova_ph2.combinatorial_db.reactions import (
+from combinatorial_db.reactions import (
     get_reaction_info, 
-    get_smiles_from_reaction
+    get_smiles_from_reaction,
+    validate_and_order_reactants,
+    perform_smarts_reaction,
+    combine_triazole_synthons,
 )
-from nova_ph2.utils import get_smiles, find_chemically_identical
+from utils import get_smiles, find_chemically_identical, get_heavy_atom_count
+
+def validate_smiles_sampler(names: List[str], smiles_list: List[Optional[str]], config: dict) -> Tuple[List[str], List[str]]:
+    valid_names: List[str] = []
+    valid_smiles: List[str] = []
+    for name, smi in zip(names, smiles_list):
+        try:
+            if not smi:
+                continue
+            if get_heavy_atom_count(smi) < config['min_heavy_atoms']:
+                continue
+            try:
+                mol = Chem.MolFromSmiles(smi)
+                if not mol:
+                    continue
+                num_rot = Chem.Descriptors.NumRotatableBonds(mol)
+                if num_rot < config['min_rotatable_bonds'] or num_rot > config['max_rotatable_bonds']:
+                    continue
+            except Exception:
+                continue
+            valid_names.append(name)
+            valid_smiles.append(smi)
+        except Exception:
+            continue
+    return valid_names, valid_smiles
+
+def compute_product_smiles(
+    rxn_id: int,
+    smarts: str,
+    roleA: int,
+    roleB: int,
+    roleC: Optional[int],
+    molA: Tuple[int, str, int],
+    molB: Tuple[int, str, int],
+    molC: Optional[Tuple[int, str, int]] = None,
+) -> Optional[str]:
+    _, smilesA, role_mask_A = molA
+    _, smilesB, role_mask_B = molB
+    if roleC:
+        assert molC is not None
+        _, smilesC, role_mask_C = molC
+        # Validate and order 3 components
+        try:
+            v = validate_and_order_reactants(smilesA, smilesB, role_mask_A, role_mask_B, roleA, roleB, smilesC, role_mask_C, roleC)
+            if not all(v):
+                return None
+            r1, r2, r3 = v
+        except Exception:
+            return None
+        # Cascade logic aligned with nova_ph2.reactions.react_three_components
+        if rxn_id == 3:
+            triazole_cooh = combine_triazole_synthons(r1, r2)
+            if not triazole_cooh:
+                return None
+            amide_smarts = "[C:1](=O)[OH].[N:2]>>[C:1](=O)[N:2]"
+            return perform_smarts_reaction(triazole_cooh, r3, amide_smarts)
+        if rxn_id == 5:
+            suzuki_br_smarts = "[#6:1][Br].[#6:2][B]([OH])[OH]>>[#6:1][#6:2]"
+            suzuki_cl_smarts = "[#6:1][Cl].[#6:2][B]([OH])[OH]>>[#6:1][#6:2]"
+            intermediate = perform_smarts_reaction(r1, r2, suzuki_br_smarts)
+            if not intermediate:
+                return None
+            return perform_smarts_reaction(intermediate, r3, suzuki_cl_smarts)
+        return None
+    # 2-component validation/order
+    try:
+        r1, r2 = validate_and_order_reactants(smilesA, smilesB, role_mask_A, role_mask_B, roleA, roleB)
+        if not r1 or not r2:
+            return None
+    except Exception:
+        return None
+    if rxn_id == 1:
+        return combine_triazole_synthons(r1, r2)
+    return perform_smarts_reaction(r1, r2, smarts)
+
+def generate_names_and_smiles_from_pools(
+    rxn_id: int,
+    n: int,
+    molecules_A: List[Tuple[int, str, int]],
+    molecules_B: List[Tuple[int, str, int]],
+    molecules_C: List[Tuple[int, str, int]],
+    is_three_component: bool,
+    smarts: str,
+    roleA: int,
+    roleB: int,
+    roleC: Optional[int],
+    seed: int = None,
+) -> Tuple[List[Optional[str]], List[Optional[str]]]:
+    if seed is not None:
+        random.seed(seed)
+    names: List[Optional[str]] = []
+    smiles_out: List[Optional[str]] = []
+    for i in range(n):
+        try:
+            mol_A = random.choice(molecules_A)
+            mol_B = random.choice(molecules_B)
+            if is_three_component:
+                mol_C = random.choice(molecules_C)
+                name = f"rxn:{rxn_id}:{mol_A[0]}:{mol_B[0]}:{mol_C[0]}"
+                smi = compute_product_smiles(rxn_id, smarts, roleA, roleB, roleC, mol_A, mol_B, mol_C)
+            else:
+                name = f"rxn:{rxn_id}:{mol_A[0]}:{mol_B[0]}"
+                smi = compute_product_smiles(rxn_id, smarts, roleA, roleB, None, mol_A, mol_B, None)
+            names.append(name)
+            smiles_out.append(smi)
+        except Exception:
+            names.append(None)
+            smiles_out.append(None)
+    return names, smiles_out
 
 def get_available_reactions(db_path: str = None) -> List[Tuple[int, str, int, int, int]]:
     """
@@ -81,6 +192,7 @@ def generate_valid_random_molecules_batch(rxn_id: int, n_samples: int, db_path: 
         db_path: Path to the molecules database
         subnet_config: Configuration for validation
         batch_size: Number of molecules to generate per batch
+        seed: Random seed (optional)
         
     Returns:
         Dict of molecules for the sampler uid=0
@@ -118,16 +230,14 @@ def generate_valid_random_molecules_batch(rxn_id: int, n_samples: int, db_path: 
         # Generate a batch of molecules (with some buffer for validation failures)
         batch_size_actual = min(batch_size, needed * 2)  # Generate 2x what we need to account for failures
         
-        #bt.logging.debug(f"Iteration {iteration}: Generating {batch_size_actual} molecules, need {needed} more")
-        
-        # Generate batch molecules efficiently
-        batch_molecules = generate_molecules_from_pools(
-            rxn_id, batch_size_actual, molecules_A, molecules_B, molecules_C, is_three_component, seed
+
+        batch_names, batch_smiles = generate_names_and_smiles_from_pools(
+            rxn_id, batch_size_actual,
+            molecules_A, molecules_B, molecules_C, is_three_component,
+            smarts, roleA, roleB, roleC, seed
         )
-        
-        # Validate the batch
-        batch_sampler_data = {"molecules": batch_molecules}
-        batch_valid_molecules, batch_valid_smiles = validate_molecules_sampler(batch_sampler_data, subnet_config)
+        # Validate directly on SMILES (no DB calls)
+        batch_valid_molecules, batch_valid_smiles = validate_smiles_sampler(batch_names, batch_smiles, subnet_config)
 
         # Deduplicate inside the batch (keep first per InChIKey)
         identical = find_chemically_identical(batch_valid_smiles)
@@ -157,9 +267,12 @@ def generate_valid_random_molecules_batch(rxn_id: int, n_samples: int, db_path: 
             seen_keys.add(key)
             valid_molecules.append(name)
             added += 1
+
+            # Stop as soon as we reach the target; attempts_total already includes this attempt
+            if len(valid_molecules) >= n_samples:
+                break
         
         progress_bar.update(added)
-        #bt.logging.debug(f"Batch validation: {len(batch_valid_molecules)}/{len(batch_molecules)} molecules passed")
     
     # Trim to exact number requested
     final_molecules = valid_molecules[:n_samples]

@@ -15,15 +15,15 @@ BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__)))
 PARENT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(PARENT_DIR)
 
-from nova_ph2.neurons.validator.scoring import score_molecules_json
-import nova_ph2.neurons.validator.scoring as scoring_module
+from validator.scoring import score_molecules_json
+import validator.scoring as scoring_module
 from random_sampler import run_sampler
-from nova_ph2.combinatorial_db.reactions import get_smiles_from_reaction
+from combinatorial_db.reactions import get_smiles_from_reaction
 
 #DB_PATH = str(Path(nova_ph2.__file__).resolve().parent / "combinatorial_db" / "molecules.sqlite")
-DB_PATH = str(Path(BASE_DIR).resolve().parent / "nova_ph2" / "combinatorial_db" / "molecules.sqlite")
+DB_PATH = str(Path(PARENT_DIR).resolve().parent / "combinatorial_db" / "molecules.sqlite")
 
-def get_config(input_file: os.path = os.path.join(BASE_DIR, "input.json")):
+def get_config(input_file: os.path = os.path.join(PARENT_DIR, "..", "input.json")):
     """
     Get config from input file
     """
@@ -117,8 +117,8 @@ def calculate_final_scores(score_dict: dict,
             inchikey_list.append(None)
 
     # Calculate final scores for each molecule
-    targets = score_dict[0]['target_scores']
-    antitargets = score_dict[0]['antitarget_scores']
+    targets = score_dict[0]['ps_target_scores']
+    antitargets = score_dict[0]['ps_antitarget_scores']
     final_scores = []
     for mol_idx in range(len(names)):
         # target average

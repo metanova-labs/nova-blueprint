@@ -45,14 +45,13 @@ def validate_molecules_and_calculate_entropy(
         for molecule in data["molecules"]:
             try:
                 # Check if reaction is allowed this epoch (if filtering enabled)
-                # (temporarily disabled):
-                # if config.get('random_valid_reaction') and not is_reaction_allowed(molecule, allowed_reaction):
-                #     bt.logging.warning(
-                #         f"UID={uid}, molecule='{molecule}' uses disallowed reaction for this epoch (only {allowed_reaction} allowed)"
-                #     )
-                #     valid_smiles = []
-                #     valid_names = []
-                #     break
+                if config.get('random_valid_reaction') and not is_reaction_allowed(molecule, allowed_reaction):
+                    bt.logging.warning(
+                        f"UID={uid}, molecule='{molecule}' uses disallowed reaction for this epoch (only {allowed_reaction} allowed)"
+                    )
+                    valid_smiles = []
+                    valid_names = []
+                    break
 
                 # temporary: Always allow reactions 4 and 5, ignore config/random selection
                 # allowed_ok = is_reaction_allowed(molecule, "rxn:4") or is_reaction_allowed(molecule, "rxn:5")
