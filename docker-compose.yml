@@ -13,9 +13,13 @@ services:
       - .env
     environment:
       - PYTHONPATH=/app
+      - HOST_MINER_RUNS=${PWD}/data/miner_runs
+      - HOST_RESULTS=${PWD}/data/results
     volumes:
       - ${BT_WALLETS_DIR:-$HOME/.bittensor/wallets}:/root/.bittensor/wallets:ro
-      - ./results:/app/results
+      - ${PWD}/data/miner_runs:/data/miner_runs
+      - ${PWD}/data/results:/data/results
+      - /var/run/docker.sock:/var/run/docker.sock
     entrypoint: ["python", "neurons/validator/scheduler.py"]
     command: ["--wallet.name", "${BT_WALLET_COLD}", "--wallet.hotkey", "${BT_WALLET_HOT}", "--logging.debug"]
 

@@ -15,8 +15,12 @@ services:
     stop_grace_period: 24h
     environment:
       - PYTHONPATH=/app
+      - HOST_MINER_RUNS=${PWD}/data/miner_runs
+      - HOST_RESULTS=${PWD}/data/results
     volumes:
       - ./:/app:rw
+      - ${PWD}/data/miner_runs:/data/miner_runs
+      - ${PWD}/data/results:/data/results
       - ${BT_WALLETS_DIR:-$HOME/.bittensor/wallets}:/root/.bittensor/wallets:ro
       - /var/run/docker.sock:/var/run/docker.sock
     env_file:

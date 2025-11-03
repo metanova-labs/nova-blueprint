@@ -12,6 +12,8 @@ import bittensor as bt
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_WORK_ROOT = Path("/data/miner_runs")
+DATA_RESULTS_ROOT = Path("/data/results")
 
 SANDBOX_IMAGE_TAG = "urdof7/miner-sandbox:latest"
 
@@ -26,7 +28,7 @@ def ensure_docker_image() -> None:
 
 
 def prepare_workdir(source_dir: Path, challenge_params: dict, dest_dir: Optional[Path] = None) -> Tuple[Path, Path]:
-    work_root = PROJECT_ROOT / ".miner_runs"
+    work_root = DATA_WORK_ROOT
     work_root.mkdir(parents=True, exist_ok=True)
     if dest_dir is None:
         workdir = Path(tempfile.mkdtemp(prefix="run_", dir=str(work_root)))
@@ -50,55 +52,14 @@ def prepare_workdir(source_dir: Path, challenge_params: dict, dest_dir: Optional
     with open(workdir / "input.json", "w", encoding="utf-8") as f:
         json.dump(challenge_params, f)
 
+    # Ensure outdir is writable by the sandbox user
     try:
-        db_container_path = "/usr/local/lib/python3.12/site-packages/nova_ph2/combinatorial_db/molecules.sqlite"
-        db_workspace_dir = workdir / "nova_ph2" / "combinatorial_db"
-        db_workspace_dir.mkdir(parents=True, exist_ok=True)
-        db_workspace_link = db_workspace_dir / "molecules.sqlite"
-        if not db_workspace_link.exists():
-            os.symlink(db_container_path, db_workspace_link)
+        host_uid = os.stat(PROJECT_ROOT).st_uid
+        host_gid = os.stat(PROJECT_ROOT).st_gid
+        os.chown(outdir, host_uid, host_gid)
     except Exception:
         pass
 
-    try:
-        os.chmod(workdir, 0o755)
-        os.chmod(outdir, 0o750)
-        for root, dirs, files in os.walk(workdir):
-            try:
-                os.chmod(root, 0o755)
-            except Exception as e:
-                bt.logging.warning(f"chmod dir failed {root}: {e}")
-            for d in dirs:
-                p = os.path.join(root, d)
-                try:
-                    os.chmod(p, 0o755)
-                except Exception as e:
-                    bt.logging.warning(f"chmod dir failed {p}: {e}")
-            for f in files:
-                p = os.path.join(root, f)
-                try:
-                    os.chmod(p, 0o644)
-                except Exception as e:
-                    bt.logging.warning(f"chmod file failed {p}: {e}")
-        try:
-            st = os.stat(outdir)
-            bt.logging.info(f"outdir perms set to {oct(st.st_mode & 0o777)} owner={st.st_uid} group={st.st_gid} path={outdir}")
-        except Exception as e:
-            bt.logging.warning(f"stat outdir failed: {e}")
-    except Exception as e:
-        bt.logging.error(f"chmod outdir/workdir failed: {e}")
-
-    try:
-        res = subprocess.run(["setfacl", "-m", "u:10001:rwx", str(outdir)], capture_output=True, text=True)
-        if res.returncode == 0:
-            bt.logging.info(f"setfacl applied on {outdir} for uid 10001")
-        else:
-            stderr = (res.stderr or "").strip()
-            bt.logging.warning(f"setfacl failed rc={res.returncode} on {outdir}: {stderr}")
-    except FileNotFoundError:
-        bt.logging.info("setfacl not found; ACL step skipped")
-    except Exception as e:
-        bt.logging.error(f"setfacl error: {e}")
 
     return workdir, outdir
 
@@ -114,7 +75,20 @@ def run_container(workdir: Path, outdir: Path) -> Tuple[int, str]:
             except Exception:
                 return str(x)
         return str(x)
-    db_dir = "/usr/local/lib/python3.12/site-packages/nova_ph2/combinatorial_db"
+    # Translate container /data path to host path for docker -v
+    host_runs_root = Path(os.environ.get("HOST_MINER_RUNS", str(DATA_WORK_ROOT)))
+    try:
+        rel = workdir.relative_to(DATA_WORK_ROOT)
+        host_workdir = (host_runs_root / rel).resolve()
+    except Exception:
+        host_workdir = workdir
+    try:
+        rel_out = outdir.relative_to(DATA_WORK_ROOT)
+        host_outdir = (host_runs_root / rel_out).resolve()
+    except Exception:
+        host_outdir = outdir
+    host_uid = os.stat(PROJECT_ROOT).st_uid
+    host_gid = os.stat(PROJECT_ROOT).st_gid
     cmd = [
         "docker", "run", "--rm",
         "--read-only",
@@ -123,6 +97,7 @@ def run_container(workdir: Path, outdir: Path) -> Tuple[int, str]:
         "--tmpfs", "/tmp:rw,noexec,nosuid,nodev",
         "--gpus", "device=0",
         "--network=none",
+        "--user", f"{host_uid}:{host_gid}",
         "-e", "HOME=/tmp",
         "-e", "XDG_CACHE_HOME=/tmp",
         "-e", "HF_HOME=/tmp",
@@ -133,15 +108,13 @@ def run_container(workdir: Path, outdir: Path) -> Tuple[int, str]:
         "-e", "SQLITE_TMPDIR=/tmp",
         "-e", "WORKDIR=/workspace",
         "-e", "OUTPUT_DIR=/output",
-        "-v", f"{workdir}:/workspace:ro",
-        "-v", f"{outdir}:/output:rw",
-        "-v", db_dir,
+        "-v", f"{host_workdir}:/workspace:ro",
+        "-v", f"{host_outdir}:/output:rw",
         SANDBOX_IMAGE_TAG,
     ]
     with open(workdir / "log.txt", "w", encoding="utf-8") as logf:
         logf.write("starting docker\n")
         logf.flush()
-        ensure_docker_image()
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
