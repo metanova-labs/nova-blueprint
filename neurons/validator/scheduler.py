@@ -3,10 +3,14 @@ import subprocess
 from datetime import datetime, timezone
 import asyncio
 import signal
-
+import json
+import os
+import threading
+from pathlib import Path
 import bittensor as bt
 from config.config_loader import load_config
 from neurons.validator.setup import get_config, setup_logging, check_registration
+from neurons.validator.weights import apply_weights
 
 
 def _get_interval_seconds() -> int:
@@ -37,6 +41,44 @@ def _format_utc(ts: float) -> str:
     dt = datetime.fromtimestamp(ts, tz=timezone.utc)
     return dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def _weights_loop(stop_event: threading.Event, cfg) -> None:
+    try:
+        interval_s = 1800  # 30 minutes
+
+        project_root = Path(__file__).resolve().parents[2]
+        results_dir = project_root / "results"
+        winner_path = results_dir / "winner.json"
+
+        bt.logging.info(f"weights: thread started (interval={interval_s}s)")
+        next_ts = time.time() + interval_s
+        while not stop_event.is_set():
+            now = time.time()
+            if now >= next_ts:
+                winner = _read_json(winner_path)
+                target_uid = 0
+                if winner and isinstance(winner.get("uid"), int):
+                    target_uid = int(winner["uid"]) 
+                bt.logging.info(f"weights: applying target_uid={target_uid}")
+                try:
+                    apply_weights(target_uid)
+                except Exception as e:
+                    bt.logging.error(f"weights: failed to set: {type(e).__name__}: {e}")
+                # schedule next run
+                next_ts = now + interval_s
+
+            # Responsive sleep with stop check
+            remaining = max(0.0, next_ts - now)
+            time.sleep(min(1.0, remaining))
+    except Exception as e:
+        bt.logging.error(f"weights: thread crashed: {type(e).__name__}: {e}")
 
 def run_competition(immediate_exit_requested: dict, current_proc: dict) -> int:
     start = time.perf_counter()
@@ -84,7 +126,7 @@ def setup_and_check_registration():
 
 def main() -> None:
     # one-time setup and registration check
-    setup_and_check_registration()
+    cfg = setup_and_check_registration()
 
     # graceful shutdown flags
     termination_requested = {"flag": False}  # graceful: SIGTERM (Watchtower)
@@ -92,8 +134,14 @@ def main() -> None:
     is_running = {"flag": False}
     current_proc = {"proc": None}
 
+    # background weights thread
+    stop_event = threading.Event()
+    weights_thread = threading.Thread(target=_weights_loop, args=(stop_event, cfg), name="weights", daemon=True)
+    weights_thread.start()
+
     def _handle_term(signum, frame):
         termination_requested["flag"] = True
+        stop_event.set()
         if is_running["flag"]:
             bt.logging.info("SIGTERM: will stop after current run finishes")
         else:
@@ -101,6 +149,7 @@ def main() -> None:
 
     def _handle_int(signum, frame):
         immediate_exit_requested["flag"] = True
+        stop_event.set()
         if is_running["flag"] and current_proc["proc"] is not None:
             bt.logging.info("SIGINT: user interrupt, will abort current run")
         else:

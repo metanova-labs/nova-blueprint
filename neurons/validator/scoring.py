@@ -137,11 +137,18 @@ async def process_epoch(config, epoch: int, uid_to_data: dict):
         #         winning_uid=winner
         #     )
 
-        return winner
+        if winner is not None:
+            try:
+                winner_score = float(score_dict[winner].get('ps_final_score'))
+            except Exception:
+                winner_score = None
+        else:
+            winner_score = None
+        return winner, winner_score
 
     except Exception as e:
         bt.logging.error(f"Error processing epoch: {e}")
-        return None
+        return None, None
 
 def score_all_proteins_psichic(
     target_proteins: list[str],

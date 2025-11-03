@@ -25,7 +25,7 @@ import bittensor as bt
 
 MAX_REPO_MB = 100
 
-"""Orchestrator: fetch commitments, run miners in sandbox, persist results."""
+"""fetch commitments, run miners in sandbox, persist results."""
 
 COMMITMENT_REGEX = re.compile(
     r"^(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)@(?P<branch>[\w./-]+)$"
@@ -264,7 +264,28 @@ async def main() -> int:
         cfg = dict(challenge_params.get("config", {}))
         cfg.update(challenge_params.get("challenge", {}))
 
-        await scoring_module.process_epoch(cfg, period, uid_to_data)
+        winner_uid, winner_score = await scoring_module.process_epoch(cfg, period, uid_to_data)
+        # Persist winner: overwrite each run
+        try:
+            if isinstance(winner_uid, int):
+                win = uid_to_data.get(winner_uid, {})
+                winner_obj = {
+                    "uid": winner_uid,
+                    "hotkey": win.get("hotkey"),
+                    "coldkey": win.get("coldkey"),
+                    "score": winner_score,
+                    "updated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                }
+                out_dir = (PROJECT_ROOT / "results").resolve()
+                out_dir.mkdir(parents=True, exist_ok=True)
+                out_path = out_dir / "winner.json"
+                tmp_path = out_dir / "winner.json.tmp"
+                with tmp_path.open("w", encoding="utf-8") as f:
+                    json.dump(winner_obj, f, separators=(",", ":"))
+                os.replace(tmp_path, out_path)
+                bt.logging.info(f"winner persisted uid={winner_uid} at {out_path}")
+        except Exception as e:
+            bt.logging.error(f"failed to persist winner: {type(e).__name__}: {e}")
     except Exception as e:
         bt.logging.error(f"scoring step failed: {e}")
 
