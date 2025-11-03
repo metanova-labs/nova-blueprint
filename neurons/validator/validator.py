@@ -232,7 +232,7 @@ async def main() -> int:
     bt.logging.info(
         f"period_index={period} start_utc={dt.datetime.utcfromtimestamp(period_start_ts).strftime('%Y-%m-%d %H:%M:%S')}Z "
         f"interval_seconds={interval_seconds} window_blocks≈{blocks_window} "
-        f"min_block={min_block} max_block={max_block}
+        f"min_block={min_block} max_block={max_block}"
     )
 
     submissions = await fetch_commitments_from_chain(network=network, netuid=netuid, min_block=min_block, max_block=max_block)
@@ -241,6 +241,22 @@ async def main() -> int:
 
     block_hash = await subtensor.determine_block_hash(current_block)
     challenge_params = build_challenge_params(str(block_hash))
+
+    # Run benchmark miner first
+    try:
+        benchmark = Miner(
+            uid=-1,
+            block_number=current_block,
+            raw="nova68miner/random_miner@main",
+            owner="nova68miner",
+            repo="random_miner",
+            branch="main",
+            hotkey="benchmark",
+        )
+        bt.logging.info("benchmark: running nova68miner/random_miner@main (uid=0)")
+        run_job(benchmark, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
+    except Exception as e:
+        bt.logging.error(f"benchmark run failed: {type(e).__name__}: {e}")
 
     try:
         metagraph = await subtensor.metagraph(netuid)
@@ -265,7 +281,7 @@ async def main() -> int:
                         continue
                     rec = json.loads(line)
                     uid = int(rec["uid"]) if "uid" in rec else None
-                    if uid is None:
+                    if uid is None or uid < 0:
                         continue
                     molecules = rec.get("result", {}).get("molecules", [])
                     uid_to_data[uid] = {
