@@ -18,7 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 from sandbox import runner
 from utils.challenge_params import build_challenge_params
 from neurons.validator import scoring as scoring_module
-from config.config_loader import load_period_duration
+from config.config_loader import load_config
 
 from neurons.validator.commitments import get_commitments
 import bittensor as bt
@@ -118,7 +118,7 @@ def ensure_miner_exists(repo_dir: Path) -> Path:
     return repo_dir
 
 
-def write_run_artifacts(runs_root: Path, period: str, miner: Miner, result_obj: Optional[Dict]) -> None:
+def write_run_artifacts(runs_root: Path, period: int, miner: Miner, result_obj: Optional[Dict]) -> None:
     if result_obj is None:
         return None
     results_dir = runs_root
@@ -145,7 +145,7 @@ def write_run_artifacts(runs_root: Path, period: str, miner: Miner, result_obj: 
     return None
 
 
-def run_job(miner: Miner, runs_root: Path, work_root: Path, challenge_params: dict, period: str) -> None:
+def run_job(miner: Miner, runs_root: Path, work_root: Path, challenge_params: dict, period: int) -> None:
     started = time.time()
     repo_dir: Optional[Path] = None
     result_obj: Optional[Dict] = None
@@ -217,10 +217,23 @@ async def main() -> int:
     subtensor = bt.async_subtensor(network=network)
     await subtensor.initialize()
     current_block = await subtensor.get_current_block()
-    period_blocks = load_period_duration()
-    period = str(current_block // period_blocks)
-    min_block = max(0, current_block - period_blocks)
+
+    cfg_all = load_config()
+    interval_seconds = int(cfg_all["competition_interval_seconds"]) 
+    now_ts = int(time.time())
+    period_index = now_ts // interval_seconds
+    period_start_ts = period_index * interval_seconds
+    period = period_index
+
+    approx_block_time_s = 12
+    blocks_window = max(1, interval_seconds // approx_block_time_s)
+    min_block = max(0, current_block - blocks_window)
     max_block = current_block
+    bt.logging.info(
+        f"period_index={period} start_utc={dt.datetime.utcfromtimestamp(period_start_ts).strftime('%Y-%m-%d %H:%M:%S')}Z "
+        f"interval_seconds={interval_seconds} window_blocks≈{blocks_window} "
+        f"min_block={min_block} max_block={max_block}
+    )
 
     submissions = await fetch_commitments_from_chain(network=network, netuid=netuid, min_block=min_block, max_block=max_block)
     miners = gather_parse_and_schedule(submissions)
