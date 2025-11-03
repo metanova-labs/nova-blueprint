@@ -194,20 +194,14 @@ def score_all_proteins_psichic(
             psichic.initialize_model(protein_sequence)
             bt.logging.info('Model initialized successfully.')
         except Exception as e:
-            try:
-                if BASE_DIR:
-                    os.system(f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/TREAT2/model.pt')} https://huggingface.co/Metanova/TREAT-2/resolve/main/model.pt")
-                psichic.initialize_model(protein_sequence)
-                bt.logging.info('Model initialized successfully.')
-            except Exception as e:
-                bt.logging.error(f'Error initializing model: {e}')
-                # Set all scores to -inf for this protein
-                for uid in score_dict:
-                    num_molecules = len(valid_molecules_by_uid.get(uid, {}).get('smiles', []))
-                    if num_molecules == 0 and uid_to_data:
-                        num_molecules = len(uid_to_data.get(uid, {}).get("molecules", []))
-                    score_dict[uid]["ps_target_scores" if is_target else "ps_antitarget_scores"][col_idx] = [-math.inf] * num_molecules
-                continue
+            bt.logging.error(f'Error initializing model: {e}')
+            # Set all scores to -inf for this protein
+            for uid in score_dict:
+                num_molecules = len(valid_molecules_by_uid.get(uid, {}).get('smiles', []))
+                if num_molecules == 0 and uid_to_data:
+                    num_molecules = len(uid_to_data.get(uid, {}).get("molecules", []))
+                score_dict[uid]["ps_target_scores" if is_target else "ps_antitarget_scores"][col_idx] = [-math.inf] * num_molecules
+            continue
         
         # Collect all unique molecules across all UIDs
         unique_molecules = {}  # {smiles: [(uid, mol_idx), ...]}
