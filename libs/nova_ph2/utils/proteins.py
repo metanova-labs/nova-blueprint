@@ -90,11 +90,10 @@ def get_challenge_params_from_blockhash(block_hash: str, weekly_target: str, num
         try:
             from .reactions import get_total_reactions
             total_reactions = get_total_reactions()
-            allowed_option = seed % total_reactions
-            if allowed_option == 0:
-                result["allowed_reaction"] = "savi"
-            else:
-                result["allowed_reaction"] = f"rxn:{allowed_option}"
+            # Exclude savi: map into [1, total_reactions-1] and always return rxn:<id>
+            rxn_count = total_reactions - 1
+            allowed_option = (seed % rxn_count) + 1
+            result["allowed_reaction"] = f"rxn:{allowed_option}"
         except Exception as e:
             bt.logging.warning(f"Failed to determine allowed reaction: {e}, defaulting to all reactions allowed")
 

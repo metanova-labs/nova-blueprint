@@ -4,7 +4,7 @@ FROM python:3.12-slim
 RUN addgroup --system appgroup && adduser --system --uid 10001 --ingroup appgroup mineruser
 
 # Provide nova_ph2 code inside the image for imports like `import nova_ph2.*`
-COPY PHASE_II/libs/nova_ph2 /usr/local/lib/python3.12/site-packages/nova_ph2
+COPY libs/nova_ph2 /usr/local/lib/python3.12/site-packages/nova_ph2
 
 # Ensure DB directory is writable by mineruser
 RUN chown -R mineruser:appgroup /usr/local/lib/python3.12/site-packages/nova_ph2/combinatorial_db \
