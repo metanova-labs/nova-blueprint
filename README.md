@@ -1,4 +1,4 @@
-## NOVA Blueprint — SN68
+## NOVA Blueprint - SN68
 
 ML‑driven drug discovery on Bittensor.
 NOVA Blueprint powers SN68 by running competitive cycles that explore vast chemical spaces, collect candidate molecules, and iteratively build on the best‑performing approaches.
@@ -48,7 +48,7 @@ Notes:
 
 ## For Miners 
 
-Your miner repo is cloned and executed in a locked‑down Docker sandbox (no network, read‑only root; use `/tmp`).
+Your miner repo is cloned and executed in a Docker sandbox (no network, read‑only root; use `/tmp`).
 
 Must‑haves:
 - `miner.py` at repo root is run as `python /workspace/miner.py`
@@ -62,7 +62,7 @@ Minimal example `result.json`:
 }
 ```
 
-Combinatorial SQLite DB: open the provided database in read‑only mode to avoid write errors on a read‑only filesystem. Example: `sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)`.
+**Note - Combinatorial SQLite DB**: open the provided database in read‑only mode to avoid write errors on a read‑only filesystem. Example: `sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)`.
 
 Timing: You have a fixed time budget to generate the highest‑scoring set of molecules, at timeout molecules are collected to be scored against other submissions.  
 Where it’s defined: `config/config.yaml` → `run.time_budget_sec` (default 1800s).  
