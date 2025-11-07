@@ -52,8 +52,8 @@ def apply_weights(target_uid: int) -> None:
         weights[0] = BURN_RATE
         weights[target_uid] = remainder
 
-    max_retries = 5
-    delay_s = 12
+    max_retries = 2
+    delay_s = 60
     for attempt in range(1, max_retries + 1):
         try:
             bt.logging.info(
