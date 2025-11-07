@@ -5,7 +5,7 @@ import bittensor as bt
 
 NETUID = 68
 MECH_ID = 1
-BURN_RATE = 0.5
+BURN_RATE = 0
 
 
 def apply_weights(target_uid: int) -> None:
