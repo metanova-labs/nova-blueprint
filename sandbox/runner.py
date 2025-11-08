@@ -26,7 +26,6 @@ def ensure_docker_image() -> None:
         bt.logging.warning(f"Pull failed for {SANDBOX_IMAGE_TAG}: {e}. Using local image if available.")
         subprocess.run(["docker", "image", "inspect", SANDBOX_IMAGE_TAG], check=True)
 
-
 def prepare_workdir(source_dir: Path, challenge_params: dict, dest_dir: Optional[Path] = None) -> Tuple[Path, Path]:
     work_root = DATA_WORK_ROOT
     work_root.mkdir(parents=True, exist_ok=True)
@@ -89,13 +88,26 @@ def run_container(workdir: Path, outdir: Path) -> Tuple[int, str]:
         host_outdir = outdir
     host_uid = os.stat(PROJECT_ROOT).st_uid
     host_gid = os.stat(PROJECT_ROOT).st_gid
+
+    container_name = f"miner-sbx-{workdir.name}".lower().replace(" ", "-")
+    # Ensure any previous container with the same name is removed
+    try:
+        subprocess.run(
+            ["docker", "rm", "-f", container_name],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        bt.logging.warning(f"pre-run cleanup failed for {container_name}: {e}")
+
     cmd = [
         "docker", "run", "--rm",
         "--read-only",
         "--cap-drop=ALL",
         "--security-opt", "no-new-privileges:true",
         "--tmpfs", "/tmp:rw,noexec,nosuid,nodev",
-        "--gpus", "device=0",
+        "--gpus", os.environ.get("SANDBOX_GPU", "device=0"),
         "--network=none",
         "--user", f"{host_uid}:{host_gid}",
         "-e", "HOME=/tmp",
@@ -110,9 +122,10 @@ def run_container(workdir: Path, outdir: Path) -> Tuple[int, str]:
         "-e", "OUTPUT_DIR=/output",
         "-v", f"{host_workdir}:/workspace:ro",
         "-v", f"{host_outdir}:/output:rw",
+        "--name", container_name,
         SANDBOX_IMAGE_TAG,
     ]
-    with open(workdir / "log.txt", "w", encoding="utf-8") as logf:
+    with open(outdir / "log.txt", "w", encoding="utf-8") as logf:
         logf.write("starting docker\n")
         logf.flush()
         proc = subprocess.Popen(
@@ -144,6 +157,19 @@ def run_container(workdir: Path, outdir: Path) -> Tuple[int, str]:
                 logf.flush()
             except Exception:
                 pass
+            # Forcibly remove the running container using the captured ID
+            try:
+                if container_name:
+                    logf.write(f"timeout: removing container by name {container_name}\n")
+                    logf.flush()
+                    subprocess.run(
+                        ["docker", "rm", "-f", container_name],
+                        check=False,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+            except Exception as e:
+                bt.logging.warning(f"timeout cleanup failed for {container_name}: {e}")
             try:
                 proc.kill()
             except Exception:
