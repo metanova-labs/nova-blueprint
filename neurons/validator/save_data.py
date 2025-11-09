@@ -93,7 +93,10 @@ def _upsert_neurons_get_ids(neurons: list[dict]) -> list[tuple[int, str, str, in
         return []
 
     data = [(int(n['uid']), str(n['coldkey']), str(n['hotkey']), i)
-            for i, n in enumerate(neurons)]
+            for i, n in enumerate(neurons) if int(n['uid']) != -1]
+
+    if not data:
+        return []
 
     sql = """
     WITH input(uid, coldkey, hotkey, ord) AS (
@@ -167,6 +170,8 @@ def _build_submissions_payload(
 
     submissions = []
     for uid, data in uid_to_data.items():
+        if uid == -1:
+            continue
         valid = valid_molecules_by_uid.get(uid, {})
         smiles_list = valid.get('smiles', [])
         names_list = valid.get('names', [])
@@ -182,10 +187,20 @@ def _build_submissions_payload(
         ps_final_score = score_dict.get(uid, {}).get('ps_final_score', -math.inf)
         ps_final_score_safe = _safe_num(ps_final_score)
 
+        raw = uid_to_data[uid].get("github_data", None)
+        try:
+            repo_owner = raw.split('/')[0]
+            repo_name = raw.split('/')[1].split('@')[0]
+            repo_branch = raw.split('@')[1]
+            code_link = f"https://github.com/{repo_owner}/{repo_name}/tree/{repo_branch}"
+        except Exception as e:
+            bt.logging.error(f"Error parsing github data {raw}: {e}")
+            code_link = None
+
         submissions.append({
             "neuron_id": neuron_id[0],
             "competition_id": competition_id,
-            "github_data": data.get("github_data", None),
+            "github_data": code_link,
             "ps_final_score": ps_final_score_safe,
             "entropy": _safe_num(entropy) if entropy is not None else 0.0,
             "code_link": None, # TODO: add code link
@@ -228,10 +243,10 @@ def _build_benchmark_payload(
         uid_to_data: dict,  
         score_dict: dict,
         competition_id: int,
-        scored_sample_path: str = os.path.join(BASE_DIR, "all_scores_benchmark.json"),
+        scored_sample_path: str = os.path.join(BASE_DIR, "all_scores_0.json"),
         ) -> dict or None:
 
-    benchmark_uid = 0
+    benchmark_uid = -1
     benchmark_name = "random_sample"
     ps_final_score = score_dict.get(benchmark_uid, {}).get("ps_final_score", -math.inf)
     ps_final_score_safe = _safe_num(ps_final_score)
@@ -283,7 +298,7 @@ def submit_epoch_results(
     uid_to_data: dict,
     valid_molecules_by_uid: dict,
     score_dict: dict,
-    scored_sample_path: str = os.path.join(BASE_DIR, "all_scores_benchmark.json"),
+    scored_sample_path: str = os.path.join(BASE_DIR, "all_scores_0.json"),
     ) -> bool:
 
     try:
@@ -300,6 +315,8 @@ def submit_epoch_results(
         bt.logging.debug(f"Submissions IDs: {sub_ids}")
 
         for sub_id, uid in zip(sub_ids, score_dict.keys()):
+            if uid == -1:
+                continue
             molecules = _build_molecule_payload(valid_molecules_by_uid, score_dict, uid, sub_id)
             molecule_ids = _insert_many('molecules', molecules)
             bt.logging.debug(f"Molecules IDs: {molecule_ids}")
