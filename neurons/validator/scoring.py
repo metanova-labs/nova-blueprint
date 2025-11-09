@@ -200,7 +200,12 @@ def score_all_proteins_psichic(
             psichic.initialize_model(protein_sequence)
             bt.logging.info('Model initialized successfully.')
         except Exception as e:
-            bt.logging.error(f'Error initializing model: {e}')
+            try:
+                os.system(f\"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/TREAT2/model.pt')} https://huggingface.co/Metanova/TREAT-2/resolve/main/model.pt\")
+                psichic.initialize_model(protein_sequence)
+                bt.logging.info('Model initialized successfully.')
+            except Exception as e:
+                bt.logging.error(f'Error initializing model: {e}')
             # Set all scores to -inf for this protein
             for uid in score_dict:
                 num_molecules = len(valid_molecules_by_uid.get(uid, {}).get('smiles', []))
