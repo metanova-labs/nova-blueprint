@@ -7,7 +7,6 @@ import os
 import json
 from typing import List, Dict
 import asyncio
-import traceback
 
 import pandas as pd
 import bittensor as bt
@@ -34,6 +33,7 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict):
     """
     global psichic
     try:
+        current_epoch = epoch
         
         # get target and antitarget sequences from config
         target_sequences = config["target_sequences"]
@@ -91,33 +91,34 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict):
 
         # Calculate final scores
         score_dict = calculate_final_scores(
-            score_dict, valid_molecules_by_uid, config, epoch_number
+            score_dict, valid_molecules_by_uid, config, current_epoch
         )
 
         # Determine winner
-        winner = determine_winner(score_dict, epoch_number)
+        winner = determine_winner(score_dict, current_epoch)
 
         # Yield so ws heartbeats can run before the next RPC
         await asyncio.sleep(0)
 
         # Submit results to dashboard API if configured
         try:
-            submit_url = os.environ.get('SUBMIT_RESULTS_URL')
-            if submit_url:
-                # Dump winner scored output to file
-                #with open(os.path.join(BASE_DIR, f"winner_scores_{epoch_number}.json"), "w") as f:
-                #    json.dump(score_dict[winner], f, ensure_ascii=False, indent=2)
-                status = submit_epoch_results(
-                    config=config,
-                    epoch_number=epoch_number,
-                    target_proteins=target_codes,
-                    antitarget_proteins=antitarget_codes,
-                    uid_to_data=uid_to_data,
-                    valid_molecules_by_uid=valid_molecules_by_uid,
-                    score_dict=score_dict
-                )
-                if status:
-                    bt.logging.info("Submitted results to dashboard DB")
+            if not bool(config.get("test_mode")):
+                submit_url = os.environ.get('SUBMIT_RESULTS_URL')
+                if submit_url:
+                    # Dump winner scored output to file
+                    #with open(os.path.join(BASE_DIR, f"winner_scores_{epoch_number}.json"), "w") as f:
+                    #    json.dump(score_dict[winner], f, ensure_ascii=False, indent=2)
+                    status = submit_epoch_results(
+                        config=config,
+                        epoch_number=epoch_number,
+                        target_proteins=target_codes,
+                        antitarget_proteins=antitarget_codes,
+                        uid_to_data=uid_to_data,
+                        valid_molecules_by_uid=valid_molecules_by_uid,
+                        score_dict=score_dict
+                    )
+                    if status:
+                        bt.logging.info("Submitted results to dashboard DB")
         except Exception as e:
             bt.logging.error(f"Failed to submit results to dashboard DB: {e}")
 
@@ -201,18 +202,19 @@ def score_all_proteins_psichic(
             bt.logging.info('Model initialized successfully.')
         except Exception as e:
             try:
-                os.system(f\"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/TREAT2/model.pt')} https://huggingface.co/Metanova/TREAT-2/resolve/main/model.pt\")
+                if BASE_DIR:
+                    os.system(f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/TREAT2/model.pt')} https://huggingface.co/Metanova/TREAT-2/resolve/main/model.pt")
                 psichic.initialize_model(protein_sequence)
                 bt.logging.info('Model initialized successfully.')
             except Exception as e:
                 bt.logging.error(f'Error initializing model: {e}')
-            # Set all scores to -inf for this protein
-            for uid in score_dict:
-                num_molecules = len(valid_molecules_by_uid.get(uid, {}).get('smiles', []))
-                if num_molecules == 0 and uid_to_data:
-                    num_molecules = len(uid_to_data.get(uid, {}).get("molecules", []))
-                score_dict[uid]["ps_target_scores" if is_target else "ps_antitarget_scores"][col_idx] = [-math.inf] * num_molecules
-            continue
+                # Set all scores to -inf for this protein
+                for uid in score_dict:
+                    num_molecules = len(valid_molecules_by_uid.get(uid, {}).get('smiles', []))
+                    if num_molecules == 0 and uid_to_data:
+                        num_molecules = len(uid_to_data.get(uid, {}).get("molecules", []))
+                    score_dict[uid]["target_scores" if is_target else "antitarget_scores"][col_idx] = [-math.inf] * num_molecules
+                continue
         
         # Collect all unique molecules across all UIDs
         unique_molecules = {}  # {smiles: [(uid, mol_idx), ...]}
@@ -297,39 +299,63 @@ def score_molecule_individually(smiles: str) -> float:
 
 def read_miner_output_from_json(path: str) -> pd.DataFrame:
     """
-    Reads molecules from JSON file. Format must be {"uid": ..., 
-    "block_number": ..., "owner": ..., "repo": ..., "branch": ..., "raw": ..., 
-    "result": {"molecules": [...]
-    }
+    Reads miner outputs from JSON or JSONL.
+    Expected object keys: "uid", "raw", "coldkey", "hotkey", "result": {"molecules": [...]}
     """
     if not os.path.exists(path):
         bt.logging.error(f"Could not find JSON file at '{path}'")
         return None
 
+    uid_to_data = {}
+
+    # JSONL input
+    if path.endswith(".jsonl"):
+        with open(path, "r", encoding="utf-8") as f:
+            for ln, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except Exception as e:
+                    bt.logging.warning(f"Skipping malformed JSONL line {ln}: {e}")
+                    continue
+
+                uid = item.get("uid", 0)
+                molecules = item.get("result", {}).get("molecules") or item.get("molecules", [])
+                uid_to_data[uid] = {
+                    "molecules": molecules,
+                    "github_data": item.get("raw", None),
+                    "coldkey": item.get("coldkey", None),
+                    "hotkey": item.get("hotkey", None),
+                }
+        return uid_to_data
+
+    # JSON input
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # structure as in uid_to_data
     if isinstance(data, dict):
         data = [data]
 
-    # if "uid" not in data[0], add it - for random sampler, assign uid=0
-    # TODO: change this to accept specific format of the combined miner output JSON file
     if "uid" not in data[0]:
-        data = [{"uid": 0, 
-        "result": {"molecules": data[0]["molecules"]},
-        "github_data": None,
-        "coldkey": None,
-        "hotkey": None
+        data = [{
+            "uid": -1,
+            "result": {"molecules": data[0].get("molecules", [])},
+            "raw": None,
+            "coldkey": None,
+            "hotkey": None,
         }]
 
-    # Every other miner will have a "uid" field
-    uid_to_data = {item["uid"]: {"molecules": item["result"]["molecules"], 
-        "github_data": item.get("raw", None),
-        "coldkey": item.get("coldkey", None),
-        "hotkey": item.get("hotkey", None)} 
-        for item in data
+    uid_to_data = {
+        item["uid"]: {
+            "molecules": item.get("result", {}).get("molecules", []),
+            "github_data": item.get("raw", None),
+            "coldkey": item.get("coldkey", None),
+            "hotkey": item.get("hotkey", None),
         }
+        for item in data
+    }
 
     return uid_to_data
 
@@ -380,6 +406,5 @@ def score_molecules_json(
     psichic = None
 
     return score_dict
-
 
 
