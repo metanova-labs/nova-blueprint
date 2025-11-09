@@ -3,8 +3,16 @@ FROM python:3.12-slim AS base
 
 # System deps
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates git \
+    && apt-get install -y --no-install-recommends curl ca-certificates git docker.io \
     && rm -rf /var/lib/apt/lists/*
+
+# Install a static Docker CLI to ensure 'docker' is available 
+ENV DOCKER_CLI_VERSION=24.0.9
+RUN curl -fsSL -o /tmp/docker.tgz https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz \
+    && tar -xz -C /usr/local/bin --strip-components=1 -f /tmp/docker.tgz docker/docker \
+    && rm /tmp/docker.tgz \
+    && chmod +x /usr/local/bin/docker \
+    && /usr/local/bin/docker --version || true
 
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh

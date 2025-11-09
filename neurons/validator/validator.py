@@ -204,8 +204,8 @@ def gather_parse_and_schedule(commit_quads: Iterable[Tuple[int, int, str, str]])
 
 
 async def main() -> int:
-    runs_root = (PROJECT_ROOT / "results").resolve()
-    work_root = (PROJECT_ROOT / ".miner_runs").resolve()
+    runs_root = Path("/data/results").resolve()
+    work_root = Path("/data/miner_runs").resolve()
     runs_root.mkdir(parents=True, exist_ok=True)
     work_root.mkdir(parents=True, exist_ok=True)
 
@@ -230,9 +230,9 @@ async def main() -> int:
     min_block = max(0, current_block - blocks_window)
     max_block = current_block
     bt.logging.info(
-        f"period_index={period} start_utc={dt.datetime.utcfromtimestamp(period_start_ts).strftime('%Y-%m-%d %H:%M:%S')}Z "
+        f"period_index={period} start_utc={dt.datetime.fromtimestamp(period_start_ts, dt.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}Z "
         f"interval_seconds={interval_seconds} window_blocks≈{blocks_window} "
-        f"min_block={min_block} max_block={max_block}
+        f"min_block={min_block} max_block={max_block}"
     )
 
     submissions = await fetch_commitments_from_chain(network=network, netuid=netuid, min_block=min_block, max_block=max_block)
@@ -241,6 +241,21 @@ async def main() -> int:
 
     block_hash = await subtensor.determine_block_hash(current_block)
     challenge_params = build_challenge_params(str(block_hash))
+
+    try:
+        benchmark = Miner(
+            uid=-1,
+            block_number=current_block,
+            raw="nova68miner/random_miner@main",
+            owner="nova68miner",
+            repo="random_miner",
+            branch="main",
+            hotkey="benchmark",
+        )
+        bt.logging.info("benchmark: running nova68miner/random_miner@main (uid=0)")
+        run_job(benchmark, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
+    except Exception as e:
+        bt.logging.error(f"benchmark run failed: {type(e).__name__}: {e}")
 
     try:
         metagraph = await subtensor.metagraph(netuid)
@@ -255,7 +270,7 @@ async def main() -> int:
         run_job(miner, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
 
     try:
-        jsonl_path = (PROJECT_ROOT / "results" / f"period_{period}_results.jsonl")
+        jsonl_path = (Path("/data/results") / f"period_{period}_results.jsonl")
         uid_to_data: Dict[int, Dict] = {}
         if jsonl_path.exists():
             with jsonl_path.open("r", encoding="utf-8") as f:
@@ -265,7 +280,7 @@ async def main() -> int:
                         continue
                     rec = json.loads(line)
                     uid = int(rec["uid"]) if "uid" in rec else None
-                    if uid is None:
+                    if uid is None or uid < 0:
                         continue
                     molecules = rec.get("result", {}).get("molecules", [])
                     uid_to_data[uid] = {
@@ -289,7 +304,7 @@ async def main() -> int:
                     "score": winner_score,
                     "updated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
                 }
-                out_dir = (PROJECT_ROOT / "results").resolve()
+                out_dir = Path("/data/results").resolve()
                 out_dir.mkdir(parents=True, exist_ok=True)
                 out_path = out_dir / "winner.json"
                 tmp_path = out_dir / "winner.json.tmp"

@@ -6,7 +6,7 @@ import bittensor as bt
 
 def get_reaction_info(rxn_id: int, db_path: str) -> tuple:
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
         cursor = conn.cursor()
         cursor.execute("SELECT smarts, roleA, roleB, roleC FROM reactions WHERE rxn_id = ?", (rxn_id,))
         result = cursor.fetchone()
@@ -19,7 +19,7 @@ def get_reaction_info(rxn_id: int, db_path: str) -> tuple:
 
 def get_molecules(mol_ids: list, db_path: str) -> list:
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
         cursor = conn.cursor()
         molecules = []
         for mol_id in mol_ids:
