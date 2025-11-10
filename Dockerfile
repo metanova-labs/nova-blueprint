@@ -3,7 +3,7 @@ FROM python:3.12-slim AS base
 
 # System deps
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates git docker.io \
+    && apt-get install -y --no-install-recommends curl wget ca-certificates git docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 # Install a static Docker CLI to ensure 'docker' is available 

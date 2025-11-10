@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 import requests
 from dotenv import load_dotenv
+import asyncio
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -55,12 +56,29 @@ def parse_commitment(raw: str, uid: int, block_number: int, hotkey: str) -> Opti
     return Miner(uid=uid, block_number=block_number, raw=raw, owner=owner, repo=repo, branch=branch, hotkey=hotkey)
 
 
+async def call_st(subtensor, network: Optional[str], rpc_fn, timeout_s: int = 10):
+    """
+    Reuse the provided async_subtensor for an RPC under timeout.
+    On timeout/exception, close and recreate the client and retry once.
+    """
+    try:
+        res = await asyncio.wait_for(rpc_fn(subtensor), timeout=timeout_s)
+        return res, subtensor
+    except (asyncio.TimeoutError, Exception) as e:
+        bt.logging.warning(f"Subtensor RPC reconnect triggered due to {type(e).__name__}: {e}")
+        await subtensor.close()
+        st = bt.async_subtensor(network=network)
+        await st.initialize()
+        res = await asyncio.wait_for(rpc_fn(st), timeout=timeout_s)
+        return res, st
+
+
 async def fetch_commitments_from_chain(network: Optional[str], netuid: int, min_block: int, max_block: int) -> List[Tuple[int, int, str, str]]:
     """Fetch plaintext commitments within a block window (one per UID)."""
     subtensor = bt.async_subtensor(network=network)
     await subtensor.initialize()
-    metagraph = await subtensor.metagraph(netuid)
-    block_hash = await subtensor.determine_block_hash(max_block)
+    metagraph, subtensor = await call_st(subtensor, network, lambda st: st.metagraph(netuid), timeout_s=10)
+    block_hash, subtensor = await call_st(subtensor, network, lambda st: st.determine_block_hash(max_block), timeout_s=10)
     commits = await get_commitments(
         subtensor=subtensor,
         metagraph=metagraph,
@@ -216,7 +234,7 @@ async def main() -> int:
 
     subtensor = bt.async_subtensor(network=network)
     await subtensor.initialize()
-    current_block = await subtensor.get_current_block()
+    current_block, subtensor = await call_st(subtensor, network, lambda st: st.get_current_block(), timeout_s=10)
 
     cfg_all = load_config()
     interval_seconds = int(cfg_all["competition_interval_seconds"]) 
@@ -239,7 +257,7 @@ async def main() -> int:
     miners = gather_parse_and_schedule(submissions)
     bt.logging.info(f"current_block={current_block} submissions={len(submissions)} miners={len(miners)}")
 
-    block_hash = await subtensor.determine_block_hash(current_block)
+    block_hash, subtensor = await call_st(subtensor, network, lambda st: st.determine_block_hash(current_block), timeout_s=10)
     challenge_params = build_challenge_params(str(block_hash))
 
     try:
@@ -258,7 +276,7 @@ async def main() -> int:
         bt.logging.error(f"benchmark run failed: {type(e).__name__}: {e}")
 
     try:
-        metagraph = await subtensor.metagraph(netuid)
+        metagraph, subtensor = await call_st(subtensor, network, lambda st: st.metagraph(netuid), timeout_s=10)
         coldkeys = getattr(metagraph, 'coldkeys', None)
         if coldkeys is not None:
             for miner in miners:
@@ -266,7 +284,9 @@ async def main() -> int:
                     miner.coldkey = coldkeys[miner.uid]
     except Exception as e:
         bt.logging.error(f"failed to populate coldkeys: {type(e).__name__}: {e}")
-    for miner in miners:
+    total_miners = len(miners)
+    for idx, miner in enumerate(miners, start=1):
+        bt.logging.info(f"running miner {idx}/{total_miners} uid={miner.uid}")
         run_job(miner, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
 
     try:

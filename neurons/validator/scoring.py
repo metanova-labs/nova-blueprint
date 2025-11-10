@@ -27,7 +27,7 @@ from neurons.validator.save_data import submit_epoch_results
 # Global variable to store PSICHIC instance - will be set by validator.py
 psichic = None
 
-async def process_epoch(config, epoch: int, uid_to_data: dict):
+async def process_epoch(config, epoch_number: int, uid_to_data: dict):
     """
     Process a single epoch end-to-end.
     """
@@ -58,10 +58,10 @@ async def process_epoch(config, epoch: int, uid_to_data: dict):
         # Initialize scoring structure
         score_dict = {
             uid: {
-                "target_scores": [[] for _ in range(len(target_codes))],
-                "antitarget_scores": [[] for _ in range(len(antitarget_codes))],
+                "ps_target_scores": [[] for _ in range(len(target_codes))],
+                "ps_antitarget_scores": [[] for _ in range(len(antitarget_codes))],
                 "entropy": None,
-                "github_data": uid_to_data[uid].get("github_data", None)
+                "github_data": uid_to_data[uid].get("raw", None)
             }
             for uid in uid_to_data
         }
@@ -102,19 +102,23 @@ async def process_epoch(config, epoch: int, uid_to_data: dict):
 
         # Submit results to dashboard API if configured
         try:
-            submit_url = os.environ.get('SUBMIT_RESULTS_URL')
-            if submit_url:
-                status = submit_epoch_results(
-                    config=config,
-                    epoch=current_epoch,
-                    target_proteins=target_codes,
-                    antitarget_proteins=antitarget_codes,
-                    uid_to_data=uid_to_data,
-                    valid_molecules_by_uid=valid_molecules_by_uid,
-                    score_dict=score_dict
-                )
-                if status:
-                    bt.logging.info("Submitted results to dashboard DB")
+            if not bool(config.get("test_mode")):
+                submit_url = os.environ.get('SUBMIT_RESULTS_URL')
+                if submit_url:
+                    # Dump winner scored output to file
+                    #with open(os.path.join(BASE_DIR, f"winner_scores_{epoch_number}.json"), "w") as f:
+                    #    json.dump(score_dict[winner], f, ensure_ascii=False, indent=2)
+                    status = submit_epoch_results(
+                        config=config,
+                        epoch_number=epoch_number,
+                        target_proteins=target_codes,
+                        antitarget_proteins=antitarget_codes,
+                        uid_to_data=uid_to_data,
+                        valid_molecules_by_uid=valid_molecules_by_uid,
+                        score_dict=score_dict
+                    )
+                    if status:
+                        bt.logging.info("Submitted results to dashboard DB")
         except Exception as e:
             bt.logging.error(f"Failed to submit results to dashboard DB: {e}")
 
@@ -198,8 +202,8 @@ def score_all_proteins_psichic(
             bt.logging.info('Model initialized successfully.')
         except Exception as e:
             try:
-                if BASE_DIR:
-                    os.system(f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/TREAT2/model.pt')} https://huggingface.co/Metanova/TREAT-2/resolve/main/model.pt")
+                # Download PSICHIC weights using wget into the standard PDBv2020_PSICHIC path
+                os.system(f"wget -O {os.path.join(BASE_DIR, 'PSICHIC/trained_weights/PDBv2020_PSICHIC/model.pt')} https://huggingface.co/Metanova/PSICHIC/resolve/main/model.pt")
                 psichic.initialize_model(protein_sequence)
                 bt.logging.info('Model initialized successfully.')
             except Exception as e:
@@ -221,7 +225,7 @@ def score_all_proteins_psichic(
                 num_molecules = 0
                 if uid_to_data:
                     num_molecules = len(uid_to_data.get(uid, {}).get("molecules", []))
-                score_dict[uid]["target_scores" if is_target else "antitarget_scores"][col_idx] = [-math.inf] * num_molecules
+                score_dict[uid]["ps_target_scores" if is_target else "ps_antitarget_scores"][col_idx] = [-math.inf] * num_molecules
                 continue
             
             for mol_idx, smiles in enumerate(valid_molecules['smiles']):
@@ -266,9 +270,9 @@ def score_all_proteins_psichic(
                 uid_scores.append(score)
             
             if is_target:
-                score_dict[uid]["target_scores"][col_idx] = uid_scores
+                score_dict[uid]["ps_target_scores"][col_idx] = uid_scores
             else:
-                score_dict[uid]["antitarget_scores"][col_idx] = uid_scores
+                score_dict[uid]["ps_antitarget_scores"][col_idx] = uid_scores
         
         bt.logging.info(f"Completed scoring for protein {protein}: {len(unique_molecules)} unique molecules")
 
@@ -295,39 +299,63 @@ def score_molecule_individually(smiles: str) -> float:
 
 def read_miner_output_from_json(path: str) -> pd.DataFrame:
     """
-    Reads molecules from JSON file. Format must be {"uid": ..., 
-    "block_number": ..., "owner": ..., "repo": ..., "branch": ..., "raw": ..., 
-    "result": {"molecules": [...]
-    }
+    Reads miner outputs from JSON or JSONL.
+    Expected object keys: "uid", "raw", "coldkey", "hotkey", "result": {"molecules": [...]}
     """
     if not os.path.exists(path):
         bt.logging.error(f"Could not find JSON file at '{path}'")
         return None
 
+    uid_to_data = {}
+
+    # JSONL input
+    if path.endswith(".jsonl"):
+        with open(path, "r", encoding="utf-8") as f:
+            for ln, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except Exception as e:
+                    bt.logging.warning(f"Skipping malformed JSONL line {ln}: {e}")
+                    continue
+
+                uid = item.get("uid", 0)
+                molecules = item.get("result", {}).get("molecules") or item.get("molecules", [])
+                uid_to_data[uid] = {
+                    "molecules": molecules,
+                    "github_data": item.get("raw", None),
+                    "coldkey": item.get("coldkey", None),
+                    "hotkey": item.get("hotkey", None),
+                }
+        return uid_to_data
+
+    # JSON input
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # structure as in uid_to_data
     if isinstance(data, dict):
         data = [data]
 
-    # if "uid" not in data[0], add it - for random sampler, assign uid=0
-    # TODO: change this to accept specific format of the combined miner output JSON file
     if "uid" not in data[0]:
-        data = [{"uid": 0, 
-        "result": {"molecules": data[0]["molecules"]},
-        "github_data": None,
-        "coldkey": None,
-        "hotkey": None
+        data = [{
+            "uid": -1,
+            "result": {"molecules": data[0].get("molecules", [])},
+            "raw": None,
+            "coldkey": None,
+            "hotkey": None,
         }]
 
-    # Every other miner will have a "uid" field
-    uid_to_data = {item["uid"]: {"molecules": item["result"]["molecules"], 
-        "github_data": item["raw"],
-        "coldkey": item["coldkey"],
-        "hotkey": item["hotkey"]} 
-        for item in data
+    uid_to_data = {
+        item["uid"]: {
+            "molecules": item.get("result", {}).get("molecules", []),
+            "github_data": item.get("raw", None),
+            "coldkey": item.get("coldkey", None),
+            "hotkey": item.get("hotkey", None),
         }
+        for item in data
+    }
 
     return uid_to_data
 
@@ -354,8 +382,8 @@ def score_molecules_json(
     # Initialize scoring structure
     score_dict = {
         uid: {
-            "target_scores": [[] for _ in range(len(target_proteins))],
-            "antitarget_scores": [[] for _ in range(len(antitarget_proteins))],
+            "ps_target_scores": [[] for _ in range(len(target_proteins))],
+            "ps_antitarget_scores": [[] for _ in range(len(antitarget_proteins))],
             "entropy": None,
         }
         for uid in uid_to_data
@@ -378,11 +406,5 @@ def score_molecules_json(
     psichic = None
 
     return score_dict
-
-def calculate_histogram(score_list: list[float]) -> np.array:
-    """
-    Calculate the histogram of a list of scores.
-    """
-    return np.histogram(score_list, bins=100, range=(0, 10))
 
 
