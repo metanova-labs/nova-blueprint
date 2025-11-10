@@ -270,7 +270,7 @@ async def main() -> int:
             branch="main",
             hotkey="benchmark",
         )
-        bt.logging.info("benchmark: running nova68miner/random_miner@main (uid=0)")
+        bt.logging.info("benchmark: running nova68miner/random_miner@main (uid=-1)")
         run_job(benchmark, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
     except Exception as e:
         bt.logging.error(f"benchmark run failed: {type(e).__name__}: {e}")

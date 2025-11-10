@@ -33,7 +33,7 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict):
     """
     global psichic
     try:
-        current_epoch = epoch
+        current_epoch = epoch_number
         
         # get target and antitarget sequences from config
         target_sequences = config["target_sequences"]
