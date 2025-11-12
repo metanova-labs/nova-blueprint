@@ -32,6 +32,8 @@ COMMITMENT_REGEX = re.compile(
     r"^(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)@(?P<branch>[\w./-]+)$"
 )
 
+BENCHMARK_GITHUB = os.environ.get("BENCHMARK_GITHUB", "nova68miner/random_miner@main")
+
 @dataclass
 class Miner:
     uid: int
@@ -261,19 +263,26 @@ async def main() -> int:
     challenge_params = build_challenge_params(str(block_hash))
 
     try:
+        m = COMMITMENT_REGEX.match(BENCHMARK_GITHUB)
+        if not m:
+            raise ValueError(f"Invalid BENCHMARK_GITHUB: {BENCHMARK_GITHUB}")
         benchmark = Miner(
             uid=-1,
             block_number=current_block,
-            raw="nova68miner/random_miner@main",
-            owner="nova68miner",
-            repo="random_miner",
-            branch="main",
+            raw=BENCHMARK_GITHUB,
+            owner=m.group("owner"),
+            repo=m.group("repo"),
+            branch=m.group("branch"),
             hotkey="benchmark",
         )
-        bt.logging.info("benchmark: running nova68miner/random_miner@main (uid=-1)")
+        bt.logging.info(f"benchmark: running {BENCHMARK_GITHUB} (uid=-1)")
         run_job(benchmark, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
     except Exception as e:
         bt.logging.error(f"benchmark run failed: {type(e).__name__}: {e}")
+
+    bench_owner = m.group("owner")
+    bench_repo = m.group("repo")
+    bench_scores_path = Path("/data/miner_runs") / f"{period}_{bench_owner}_{bench_repo}_-1" / "all_scores_0.json"
 
     try:
         metagraph, subtensor = await call_st(subtensor, network, lambda st: st.metagraph(netuid), timeout_s=10)
@@ -300,7 +309,7 @@ async def main() -> int:
                         continue
                     rec = json.loads(line)
                     uid = int(rec["uid"]) if "uid" in rec else None
-                    if uid is None or uid < 0:
+                    if uid is None:
                         continue
                     molecules = rec.get("result", {}).get("molecules", [])
                     uid_to_data[uid] = {
@@ -312,7 +321,7 @@ async def main() -> int:
         cfg = dict(challenge_params.get("config", {}))
         cfg.update(challenge_params.get("challenge", {}))
 
-        winner_uid, winner_score = await scoring_module.process_epoch(cfg, period, uid_to_data)
+        winner_uid, winner_score = await scoring_module.process_epoch(cfg, period, uid_to_data, str(bench_scores_path))
         # Persist winner: overwrite each run
         try:
             if isinstance(winner_uid, int):

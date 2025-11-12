@@ -27,7 +27,7 @@ from neurons.validator.save_data import submit_epoch_results
 # Global variable to store PSICHIC instance - will be set by validator.py
 psichic = None
 
-async def process_epoch(config, epoch_number: int, uid_to_data: dict):
+async def process_epoch(config, epoch_number: int, uid_to_data: dict, scored_sample_path: str):
     """
     Process a single epoch end-to-end.
     """
@@ -105,9 +105,6 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict):
             if not bool(config.get("test_mode")):
                 submit_url = os.environ.get('SUBMIT_RESULTS_URL')
                 if submit_url:
-                    # Dump winner scored output to file
-                    #with open(os.path.join(BASE_DIR, f"winner_scores_{epoch_number}.json"), "w") as f:
-                    #    json.dump(score_dict[winner], f, ensure_ascii=False, indent=2)
                     status = submit_epoch_results(
                         config=config,
                         epoch_number=epoch_number,
@@ -115,7 +112,8 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict):
                         antitarget_proteins=antitarget_codes,
                         uid_to_data=uid_to_data,
                         valid_molecules_by_uid=valid_molecules_by_uid,
-                        score_dict=score_dict
+                        score_dict=score_dict,
+                        scored_sample_path=scored_sample_path,
                     )
                     if status:
                         bt.logging.info("Submitted results to dashboard DB")
