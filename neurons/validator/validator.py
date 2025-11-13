@@ -282,7 +282,7 @@ async def main() -> int:
 
     bench_owner = m.group("owner")
     bench_repo = m.group("repo")
-    bench_scores_path = Path("/data/miner_runs") / f"{period}_{bench_owner}_{bench_repo}_-1" / "all_scores_0.json"
+    bench_scores_path = Path("/data/miner_runs") / f"{period}_{bench_owner}_{bench_repo}_-1" / "out" / "all_scores_0.json"
 
     try:
         metagraph, subtensor = await call_st(subtensor, network, lambda st: st.metagraph(netuid), timeout_s=10)
