@@ -1,0 +1,28 @@
+name: observability
+services:
+  loki:
+    image: grafana/loki:2.9.6
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ../ops/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    ports:
+      - "3100:3100"
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../ops/grafana/provisioning:/etc/grafana/provisioning
+      - grafana-storage:/var/lib/grafana
+    depends_on:
+      - loki
+
+volumes:
+  loki-data:
+  grafana-storage:
+
+
+
+

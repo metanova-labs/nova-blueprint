@@ -1,0 +1,37 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /positions/positions.yaml
+
+clients:
+  - url: ${LOKI_URL}
+
+scrape_configs:
+  # Requires container labels:
+  # app=nova_blueprint, role=validator|miner, period=<num>, uid=<num for miners>
+  - job_name: docker_logs
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      # Keep only containers labeled for this app
+      - source_labels: ['__meta_docker_container_label_app']
+        regex: nova_blueprint
+        action: keep
+      # Map container labels to Loki labels
+      - source_labels: ['__meta_docker_container_label_app']
+        target_label: app
+      - source_labels: ['__meta_docker_container_label_role']
+        target_label: role
+      - source_labels: ['__meta_docker_container_label_period']
+        target_label: period
+      - source_labels: ['__meta_docker_container_label_uid']
+        target_label: uid
+      - source_labels: ['__meta_docker_container_label_env']
+        target_label: env
+    pipeline_stages:
+      - docker: {}
+
+

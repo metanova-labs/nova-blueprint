@@ -1,0 +1,45 @@
+server:
+  http_listen_port: 3100
+
+auth_enabled: false
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: boltdb-shipper
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+
+limits_config:
+  retention_period: 168h
+  retention_stream:
+    - selector: '{app="nova_blueprint",role="validator"}'
+      priority: 1
+      period: 720h
+    - selector: '{app="nova_blueprint",role="miner"}'
+      priority: 1
+      period: 168h
+
+
+
+
