@@ -182,7 +182,7 @@ def run_job(miner: Miner, runs_root: Path, work_root: Path, challenge_params: di
         dest = work_root / f"{period}_{safe_repo}_{miner.uid}"
         workdir, outdir = runner.prepare_workdir(miner_dir, challenge_params, dest_dir=dest)
         bt.logging.info(f"cloning/running {miner.owner}/{miner.repo}@{miner.branch} uid={miner.uid} workdir={workdir}")
-        code, output = runner.run_container(workdir, outdir)
+        code, output = runner.run_container(workdir, outdir, period=period, uid=int(miner.uid))
         bt.logging.info(f"run finished uid={miner.uid} exit={code} log={outdir / 'log.txt'} result={outdir / 'result.json'}")
         exit_code = code
         try:

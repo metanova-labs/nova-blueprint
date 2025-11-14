@@ -1,5 +1,4 @@
 name: nova-blueprint
-
 services:
   nova-blueprint:
     image: ${VALIDATOR_IMAGE:-urdof7/nova-blueprint:latest}
@@ -20,6 +19,9 @@ services:
       - ${PWD}/data/miner_runs:/data/miner_runs
       - ${PWD}/data/results:/data/results
       - /var/run/docker.sock:/var/run/docker.sock
+    labels:
+      app: nova_blueprint
+      role: validator
     entrypoint: ["python", "neurons/validator/scheduler.py"]
     command: ["--wallet.name", "${BT_WALLET_COLD}", "--wallet.hotkey", "${BT_WALLET_HOT}", "--logging.debug"]
 
