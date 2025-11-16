@@ -1,0 +1,5 @@
+{$GRAFANA_DOMAIN} {
+	reverse_proxy grafana:3000
+}
+
+
