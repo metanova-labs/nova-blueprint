@@ -52,7 +52,7 @@ def _read_json(path: Path) -> dict | None:
 
 def _weights_loop(stop_event: threading.Event, cfg) -> None:
     try:
-        interval_s = 1800  # 30 minutes
+        interval_s = 3600  # 60 minutes
 
         winner_path = Path("/data/results/winner.json")
 
