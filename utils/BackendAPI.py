@@ -1,7 +1,7 @@
 from typing import Any, Dict, Optional
 import bittensor as bt
 import aiohttp
-from utils.config import settings
+import os
 
 
 class BackendAPI:
@@ -19,8 +19,8 @@ class BackendAPI:
         if self._initialized:
             return
 
-        self._base_url = settings.backend_api_url
-        self._api_token = settings.backend_api_token
+        self._base_url = os.getenv("BACKEND_API_URL")
+        self._api_token = os.getenv("BACKEND_API_TOKEN")
         self._session: Optional[aiohttp.ClientSession] = None
         if not self._base_url:
             bt.logging.warning("BACKEND_API_URL not set; API calls will fail.")
