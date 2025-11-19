@@ -99,6 +99,58 @@ def to_miners(commitments: Iterable[Miner]) -> List[Miner]:
     return list(commitments)
 
 
+def commitment_to_clone(raw: Optional[str]):
+    """
+    Convert commitment string 'owner/repo@branch' to (clone_url, branch).
+    Returns (None, None) if parsing fails.
+    """
+    if not isinstance(raw, str) or "/" not in raw or "@" not in raw:
+        return None, None
+    try:
+        owner, rest = raw.split("/", 1)
+        repo, branch = rest.split("@", 1)
+        return f"https://github.com/{owner}/{repo}.git", branch
+    except Exception:
+        return None, None
+
+
+def get_previous_winner(current_block: int) -> Optional[Miner]:
+    """
+    Read previous winner once and build a Miner with the original UID.
+    """
+    try:
+        winner_json_path = Path("/data/results/winner.json")
+        if not winner_json_path.exists():
+            bt.logging.info("previous winner: no previous winner found; skipping")
+            return None
+        with winner_json_path.open("r", encoding="utf-8") as f:
+            last_win = json.load(f)
+        uid_val = int(last_win["uid"])
+        raw = str(last_win["raw"])
+        hotkey_val = last_win["hotkey"]
+        prev_winner = parse_commitment(raw, uid=uid_val, block_number=current_block, hotkey=hotkey_val)
+        if prev_winner is None:
+            bt.logging.info("previous winner: malformed winner.json (commitment parse failed); skipping")
+            return None
+        return prev_winner
+    except Exception as e:
+        bt.logging.error(f"previous winner: failed: {type(e).__name__}: {e}")
+        return None
+
+
+def inject_previous_winner(miners: List[Miner], prev: Optional[Miner]) -> tuple[List[Miner], Optional[int]]:
+    """
+    Replace any submission for the previous winner's UID with the saved winner Miner.
+    Returns updated miners and the previous winner UID (if present).
+    """
+    if prev is None:
+        return miners, None
+    updated = [m for m in miners if int(m.uid) != int(prev.uid)]
+    updated.append(prev)
+    bt.logging.info(f"previous winner: included {prev.owner}/{prev.repo}@{prev.branch} as UID={prev.uid}")
+    return updated, int(prev.uid)
+
+
 def clone_repo(owner: str, repo: str, branch: str, work_root: Path) -> Path:
     repo_url = f"https://github.com/{owner}/{repo}.git"
     target_dir = Path(tempfile.mkdtemp(prefix=f"{owner}-{repo}-", dir=str(work_root)))
@@ -280,6 +332,9 @@ async def main() -> int:
     except Exception as e:
         bt.logging.error(f"benchmark run failed: {type(e).__name__}: {e}")
 
+    prev_winner = get_previous_winner(current_block)
+    miners, prev_winner_uid = inject_previous_winner(miners, prev_winner)
+
     bench_owner = m.group("owner")
     bench_repo = m.group("repo")
     bench_scores_path = Path("/data/miner_runs") / f"{period}_{bench_owner}_{bench_repo}_-1" / "out" / "all_scores_0.json"
@@ -309,7 +364,7 @@ async def main() -> int:
                         continue
                     rec = json.loads(line)
                     uid = int(rec["uid"]) if "uid" in rec else None
-                    if uid is None:
+                    if uid is None or uid == -1:
                         continue
                     molecules = rec.get("result", {}).get("molecules", [])
                     uid_to_data[uid] = {
@@ -320,16 +375,24 @@ async def main() -> int:
                     }
         cfg = dict(challenge_params.get("config", {}))
         cfg.update(challenge_params.get("challenge", {}))
+        if prev_winner_uid is not None:
+            cfg["prev_winner_uid"] = prev_winner_uid
 
         winner_uid, winner_score = await scoring_module.process_epoch(cfg, period, uid_to_data, str(bench_scores_path))
         # Persist winner: overwrite each run
         try:
             if isinstance(winner_uid, int):
                 win = uid_to_data.get(winner_uid, {})
+
+                raw_commitment = win.get("github_data")
+                github_url, github_branch = commitment_to_clone(raw_commitment)
                 winner_obj = {
                     "uid": winner_uid,
                     "hotkey": win.get("hotkey"),
                     "coldkey": win.get("coldkey"),
+                    "raw": raw_commitment,
+                    "github": github_url,
+                    "branch": github_branch,
                     "score": winner_score,
                     "updated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
                 }
