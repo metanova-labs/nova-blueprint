@@ -1,5 +1,21 @@
-{$GRAFANA_DOMAIN} {
+grafana.{$DOMAIN} {
 	reverse_proxy grafana:3000
+}
+loki.{$DOMAIN} {
+	# Loki ingestion - protected via Basic Auth
+	@push path /loki/api/v1/push
+	basic_auth @push {
+		promtail {$LOKI_BASIC_AUTH_HASH}
+	}
+	handle @push {
+		reverse_proxy loki:3100
+	}
+
+	# Deny anything else on this host
+	respond "Forbidden" 403
+}
+blueprint-api.{$DOMAIN} {
+	reverse_proxy blueprint-api:8001
 }
 
 

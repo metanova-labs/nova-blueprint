@@ -7,13 +7,13 @@ services:
       - ../ops/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
       - loki-data:/loki
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
 
   grafana:
     image: grafana/grafana:11.0.0
     environment:
-      - GF_SERVER_DOMAIN=${GRAFANA_DOMAIN}
-      - GF_SERVER_ROOT_URL=https://${GRAFANA_DOMAIN}
+      - GF_SERVER_DOMAIN=grafana.${DOMAIN}
+      - GF_SERVER_ROOT_URL=https://grafana.${DOMAIN}
       - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD}
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_NAME=Main Org.
@@ -30,7 +30,8 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      - GRAFANA_DOMAIN=${GRAFANA_DOMAIN}
+      - DOMAIN=${DOMAIN}
+      - LOKI_BASIC_AUTH_HASH=${LOKI_BASIC_AUTH_HASH}
     volumes:
       - ../ops/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
