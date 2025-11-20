@@ -7,6 +7,9 @@ positions:
 
 clients:
   - url: ${LOKI_URL}
+    basic_auth:
+      username: promtail
+      password: ${LOKI_BASIC_AUTH_PASSWORD}
 
 scrape_configs:
   # Requires container labels:
