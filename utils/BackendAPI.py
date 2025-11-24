@@ -61,7 +61,7 @@ class BackendAPI:
         try:
             session = await self._get_session()
             async with session.post(
-                "submissions/submit-epoch",
+                "competitions/submit-epoch",
                 json=payload,
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as response:
