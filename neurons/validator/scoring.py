@@ -105,7 +105,7 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict, scored_sam
             if not bool(config.get("test_mode")):
                 submit_url = os.environ.get('SUBMIT_RESULTS_URL')
                 if submit_url:
-                    status = submit_epoch_results(
+                    status = await submit_epoch_results(
                         config=config,
                         epoch_number=epoch_number,
                         target_proteins=target_codes,
