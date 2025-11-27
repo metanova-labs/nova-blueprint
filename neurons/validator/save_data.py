@@ -11,7 +11,6 @@ load_dotenv()
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 
-
 def _build_benchmark_payload(
     uid_to_data: dict,
     score_dict: dict,
@@ -89,7 +88,7 @@ async def submit_epoch_results(
 
         # Build POST payload
         payload = {
-            "epoch_number": epoch_number,
+            "epoch": epoch_number,
             "target_proteins": target_proteins,
             "antitarget_proteins": antitarget_proteins,
             "config": {
