@@ -1,61 +1,11 @@
 import os
-import math
 import json
 import bittensor as bt
-import pandas as pd
-import numpy as np
-
 from dotenv import load_dotenv
 
 load_dotenv()
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-
-def _build_benchmark_payload(
-    uid_to_data: dict,
-    score_dict: dict,
-    scored_sample_path: str = os.path.join(BASE_DIR, "all_scores_0.json"),
-) -> dict or None:
-    benchmark_uid = -1
-    benchmark_name = "random_sample"
-    ps_final_score = score_dict.get(benchmark_uid, {}).get("ps_final_score", -math.inf)
-    ps_final_score_safe = ps_final_score
-
-    if not os.path.exists(scored_sample_path):
-        bt.logging.error(f"Scored sample path {scored_sample_path} does not exist")
-        return None
-
-    with open(scored_sample_path, "r") as f:
-        scored_sample = json.load(f)
-    scored_sample = scored_sample["scored_molecules"]
-    df = pd.DataFrame(
-        {
-            "name": [score[0] for score in scored_sample],
-            "score": [score[1] for score in scored_sample],
-        }
-    )
-
-    curve = {
-        "mean": df["score"].mean(),
-        "stdv": df["score"].std(),
-        "histogram": {
-            "bounds": [
-                -10,
-                10,
-            ],  # keep hardcoded for now, probably won't need to change until different scoring system
-            "frequencies": np.histogram(df["score"], bins=200, range=(-10, 10))[
-                0
-            ].tolist(),
-        },
-    }
-
-    benchmark = {
-        "name": benchmark_name,
-        "github_data": uid_to_data.get(benchmark_uid, {}).get("github_data", None),
-        "ps_final_score": ps_final_score_safe,
-        "curve": curve,
-    }
-    return benchmark
 
 
 async def submit_epoch_results(
@@ -74,12 +24,16 @@ async def submit_epoch_results(
     try:
         from utils.BackendAPI import BackendAPI
 
-        # Build benchmark payload if available
-        benchmark = _build_benchmark_payload(
-            uid_to_data,
-            score_dict,
-            scored_sample_path,
-        )
+        # load entire scored sample JSON file for backend
+        scored_sample_data = None
+        if os.path.exists(scored_sample_path):
+            try:
+                with open(scored_sample_path, "r") as f:
+                    scored_sample_data = json.load(f)
+            except Exception as e:
+                bt.logging.warning(
+                    f"Failed to load scored sample data from {scored_sample_path}: {e}"
+                )
 
         # Convert integer keys to strings for JSON
         score_dict_str = {str(k): v for k, v in score_dict.items()}
@@ -102,11 +56,8 @@ async def submit_epoch_results(
             "score_dict": score_dict_str,
             "uid_to_data": uid_to_data_str,
             "valid_molecules_by_uid": valid_molecules_str,
+            "scored_sample_data": scored_sample_data,
         }
-
-        # Add benchmark if available
-        if benchmark:
-            payload["benchmark"] = benchmark
 
         # Send via BackendAPI
         api = BackendAPI()
