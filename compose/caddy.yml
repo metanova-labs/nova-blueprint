@@ -1,0 +1,29 @@
+name: caddy
+
+services:
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN}
+      - LOKI_BASIC_AUTH_HASH=${LOKI_BASIC_AUTH_HASH}
+      - MINIO_CONSOLE_BASIC_AUTH_HASH=${MINIO_CONSOLE_BASIC_AUTH_HASH}
+    volumes:
+      - ../ops/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: always
+    networks:
+      - edge
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  edge:
+    external: true
+
+

@@ -1,6 +1,7 @@
 grafana.{$DOMAIN} {
 	reverse_proxy grafana:3000
 }
+
 loki.{$DOMAIN} {
 	# Loki ingestion - protected via Basic Auth
 	@push path /loki/api/v1/push
@@ -16,6 +17,15 @@ loki.{$DOMAIN} {
 }
 blueprint-api.{$DOMAIN} {
 	reverse_proxy blueprint-api:8001
+}
+
+
+s3.{$DOMAIN} {
+	reverse_proxy minio:9000
+}
+
+minio.{$DOMAIN} {
+	reverse_proxy minio:9001
 }
 
 

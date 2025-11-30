@@ -8,6 +8,10 @@ services:
       - loki-data:/loki
     ports:
       - "127.0.0.1:3100:3100"
+    networks:
+      edge:
+        aliases:
+          - loki
 
   grafana:
     image: grafana/grafana:11.0.0
@@ -23,28 +27,18 @@ services:
       - grafana-storage:/var/lib/grafana
     depends_on:
       - loki
-
-  caddy:
-    image: caddy:2
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      - DOMAIN=${DOMAIN}
-      - LOKI_BASIC_AUTH_HASH=${LOKI_BASIC_AUTH_HASH}
-    volumes:
-      - ../ops/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    restart: always
-    depends_on:
-      - grafana
+    networks:
+      edge:
+        aliases:
+          - grafana
 
 volumes:
   loki-data:
   grafana-storage:
-  caddy_data:
-  caddy_config:
+
+networks:
+  edge:
+    external: true
 
 
 
