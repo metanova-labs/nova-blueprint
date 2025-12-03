@@ -15,10 +15,14 @@ loki.{$DOMAIN} {
 	# Deny anything else on this host
 	respond "Forbidden" 403
 }
+
 blueprint-api.{$DOMAIN} {
 	reverse_proxy blueprint-api:8001
 }
 
+vali-score-share-api.{$DOMAIN} {
+	reverse_proxy vali-score-share-api:8000
+}
 
 s3.{$DOMAIN} {
 	reverse_proxy minio:9000
