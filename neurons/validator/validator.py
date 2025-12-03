@@ -3,14 +3,11 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
-import requests
 from dotenv import load_dotenv
 import asyncio
 
@@ -19,12 +16,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 from sandbox import runner
 from utils.challenge_params import build_challenge_params
 from neurons.validator import scoring as scoring_module
+from neurons.validator.code_archive import (
+    download_and_extract_snapshot,
+    download_benchmark_snapshot,
+    upload_miner_snapshot,
+)
 from config.config_loader import load_config
 
 from neurons.validator.commitments import get_commitments
 import bittensor as bt
-
-MAX_REPO_MB = 100
 
 """fetch commitments, run miners in sandbox, persist results."""
 
@@ -114,9 +114,10 @@ def commitment_to_clone(raw: Optional[str]):
         return None, None
 
 
-def get_previous_winner(current_block: int) -> Optional[Miner]:
+def get_previous_winner(current_block: int) -> Optional[tuple[Miner, int]]:
     """
     Read previous winner once and build a Miner with the original UID.
+    Returns (Miner, snapshot_epoch) or None if no previous winner is recorded.
     """
     try:
         winner_json_path = Path("/data/results/winner.json")
@@ -128,11 +129,13 @@ def get_previous_winner(current_block: int) -> Optional[Miner]:
         uid_val = int(last_win["uid"])
         raw = str(last_win["raw"])
         hotkey_val = last_win["hotkey"]
+        snapshot_epoch_val = last_win["snapshot_epoch"]
+        snapshot_epoch_int = int(snapshot_epoch_val)
         prev_winner = parse_commitment(raw, uid=uid_val, block_number=current_block, hotkey=hotkey_val)
         if prev_winner is None:
             bt.logging.info("previous winner: malformed winner.json (commitment parse failed); skipping")
             return None
-        return prev_winner
+        return prev_winner, snapshot_epoch_int
     except Exception as e:
         bt.logging.error(f"previous winner: failed: {type(e).__name__}: {e}")
         return None
@@ -151,38 +154,27 @@ def inject_previous_winner(miners: List[Miner], prev: Optional[Miner]) -> tuple[
     return updated, int(prev.uid)
 
 
-def clone_repo(owner: str, repo: str, branch: str, work_root: Path) -> Path:
-    repo_url = f"https://github.com/{owner}/{repo}.git"
-    target_dir = Path(tempfile.mkdtemp(prefix=f"{owner}-{repo}-", dir=str(work_root)))
-
-    try:
-        api_url = f"https://api.github.com/repos/{owner}/{repo}"
-        headers: Dict[str, str] = {}
-        token = os.environ.get("GITHUB_TOKEN")
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        resp = requests.get(api_url, headers=headers, timeout=5)
-        if resp.ok:
-            size_kb = int(resp.json().get("size", 0))
-            if (size_kb / 1024.0) > MAX_REPO_MB:
-                raise RuntimeError(
-                    f"Repo {owner}/{repo} reported size {size_kb/1024:.1f} MiB exceeds limit {MAX_REPO_MB} MiB"
-                )
-    except Exception:
-        pass
-
-    subprocess.run([
-        "git",
-        "-c", "filter.lfs.smudge=",
-        "-c", "filter.lfs.required=false",
-        "clone", "--depth", "1", "--single-branch", "--branch", branch,
-        repo_url, str(target_dir)
-    ], check=True)
-
-    subprocess.run(["git", "-C", str(target_dir), "rev-parse", "HEAD"], check=True, capture_output=True, text=True)
-    return target_dir
-
-
+def upload_snapshots_for_epoch(miners: List[Miner], epoch: int) -> None:
+    """
+    Upload code snapshots for all miners for a single epoch.
+    """
+    for miner in miners:
+        try:
+            bt.logging.info(
+                f"snapshot: uploading {miner.owner}/{miner.repo}@{miner.branch} uid={miner.uid} epoch={epoch}"
+            )
+            upload_miner_snapshot(
+                owner=miner.owner,
+                repo=miner.repo,
+                branch=miner.branch,
+                uid=int(miner.uid),
+                epoch=epoch,
+            )
+        except Exception as e:
+            bt.logging.error(
+                f"snapshot: upload failed for uid={miner.uid} {miner.owner}/{miner.repo}@{miner.branch}: "
+                f"{type(e).__name__}: {e}"
+            )
 def ensure_miner_exists(repo_dir: Path) -> Path:
     miner_path = repo_dir / "miner.py"
     if not miner_path.is_file():
@@ -217,26 +209,59 @@ def write_run_artifacts(runs_root: Path, period: int, miner: Miner, result_obj: 
     return None
 
 
-def run_job(miner: Miner, runs_root: Path, work_root: Path, challenge_params: dict, period: int) -> None:
-    started = time.time()
+def run_job(
+    miner: Miner,
+    runs_root: Path,
+    work_root: Path,
+    challenge_params: dict,
+    period: int,
+    snapshot_epoch: Optional[int] = None,
+) -> None:
     repo_dir: Optional[Path] = None
     result_obj: Optional[Dict] = None
-    exit_code: Optional[int] = None
-    reason_on_fail: Optional[str] = None
 
     try:
-        repo_dir = clone_repo(miner.owner, miner.repo, miner.branch, work_root)
+        safe_repo = f"{miner.owner}_{miner.repo}".replace("/", "_")
+        dest = work_root / f"{period}_{safe_repo}_{miner.uid}"
+
+        if int(miner.uid) == -1:
+            try:
+                repo_dir = download_benchmark_snapshot(work_root=work_root, dest_dir=dest)
+                bt.logging.info("using benchmark snapshot")
+            except Exception as e:
+                bt.logging.error(f"benchmark snapshot download failed: {type(e).__name__}: {e}")
+                return
+        else:
+            effective_epoch = snapshot_epoch if snapshot_epoch is not None else period
+            try:
+                repo_dir = download_and_extract_snapshot(
+                    epoch=effective_epoch,
+                    uid=int(miner.uid),
+                    work_root=work_root,
+                    dest_dir=dest,
+                )
+                if repo_dir is not None:
+                    bt.logging.info(f"using archived snapshot for uid={miner.uid} epoch={effective_epoch}")
+            except Exception as e:
+                bt.logging.error(
+                    f"snapshot download failed for uid={miner.uid} epoch={effective_epoch}: {type(e).__name__}: {e}"
+                )
+                repo_dir = None
+
+            if repo_dir is None:
+                bt.logging.info(
+                    f"no archived snapshot available for uid={miner.uid} epoch={effective_epoch}; skipping run"
+                )
+                return
+
         miner_dir = ensure_miner_exists(repo_dir)
 
         runner.ensure_docker_image()
 
-        safe_repo = f"{miner.owner}_{miner.repo}".replace("/", "_")
-        dest = work_root / f"{period}_{safe_repo}_{miner.uid}"
         workdir, outdir = runner.prepare_workdir(miner_dir, challenge_params, dest_dir=dest)
         bt.logging.info(f"cloning/running {miner.owner}/{miner.repo}@{miner.branch} uid={miner.uid} workdir={workdir}")
         code, output = runner.run_container(workdir, outdir, period=period, uid=int(miner.uid))
         bt.logging.info(f"run finished uid={miner.uid} exit={code} log={outdir / 'log.txt'} result={outdir / 'result.json'}")
-        exit_code = code
         try:
             with open(outdir / "result.json", "r", encoding="utf-8") as f:
                 raw = json.load(f)
@@ -248,7 +273,6 @@ def run_job(miner: Miner, runs_root: Path, work_root: Path, challenge_params: di
             result_obj = None
 
     except Exception as e:
-        reason_on_fail = f"exception: {type(e).__name__}: {e}"
         bt.logging.error(f"run failed uid={miner.uid}: {type(e).__name__}: {e}")
     finally:
         if repo_dir is not None:
@@ -311,6 +335,8 @@ async def main() -> int:
     miners = gather_parse_and_schedule(submissions)
     bt.logging.info(f"current_block={current_block} submissions={len(submissions)} miners={len(miners)}")
 
+    upload_snapshots_for_epoch(miners, period)
+
     block_hash, subtensor = await call_st(subtensor, network, lambda st: st.determine_block_hash(current_block), timeout_s=10)
     challenge_params = build_challenge_params(str(block_hash))
 
@@ -332,8 +358,13 @@ async def main() -> int:
     except Exception as e:
         bt.logging.error(f"benchmark run failed: {type(e).__name__}: {e}")
 
-    prev_winner = get_previous_winner(current_block)
-    miners, prev_winner_uid = inject_previous_winner(miners, prev_winner)
+    prev_winner_data = get_previous_winner(current_block)
+    if prev_winner_data is not None:
+        prev_winner, prev_snapshot_epoch = prev_winner_data
+        miners, prev_winner_uid = inject_previous_winner(miners, prev_winner)
+    else:
+        prev_winner_uid = None
+        prev_snapshot_epoch = None
 
     bench_owner = m.group("owner")
     bench_repo = m.group("repo")
@@ -351,7 +382,19 @@ async def main() -> int:
     total_miners = len(miners)
     for idx, miner in enumerate(miners, start=1):
         bt.logging.info(f"running miner {idx}/{total_miners} uid={miner.uid}")
-        run_job(miner, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
+        snapshot_epoch: Optional[int]
+        if prev_winner_uid is not None and miner.uid == prev_winner_uid and prev_snapshot_epoch is not None:
+            snapshot_epoch = prev_snapshot_epoch
+        else:
+            snapshot_epoch = None
+        run_job(
+            miner,
+            runs_root=runs_root,
+            work_root=work_root,
+            challenge_params=challenge_params,
+            period=period,
+            snapshot_epoch=snapshot_epoch,
+        )
 
     try:
         jsonl_path = (Path("/data/results") / f"period_{period}_results.jsonl")
@@ -387,6 +430,23 @@ async def main() -> int:
 
                 raw_commitment = win.get("github_data")
                 github_url, github_branch = commitment_to_clone(raw_commitment)
+
+                # Determine snapshot_epoch: keep existing for same uid, else set to current period
+                snapshot_epoch: Optional[int] = None
+                winner_json_path = Path("/data/results/winner.json")
+                if winner_json_path.exists():
+                    try:
+                        with winner_json_path.open("r", encoding="utf-8") as f:
+                            prev = json.load(f)
+                        prev_uid = int(prev.get("uid", -1))
+                        prev_snapshot_epoch_val = prev.get("snapshot_epoch")
+                        if prev_uid == winner_uid and prev_snapshot_epoch_val is not None:
+                            snapshot_epoch = int(prev_snapshot_epoch_val)
+                    except Exception:
+                        snapshot_epoch = None
+                if snapshot_epoch is None:
+                    snapshot_epoch = period
+
                 winner_obj = {
                     "uid": winner_uid,
                     "hotkey": win.get("hotkey"),
@@ -395,6 +455,7 @@ async def main() -> int:
                     "github": github_url,
                     "branch": github_branch,
                     "score": winner_score,
+                    "snapshot_epoch": snapshot_epoch,
                     "updated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
                 }
                 out_dir = Path("/data/results").resolve()
