@@ -377,6 +377,7 @@ async def main() -> int:
         cfg.update(challenge_params.get("challenge", {}))
         if prev_winner_uid is not None:
             cfg["prev_winner_uid"] = prev_winner_uid
+        cfg["min_improvement_margin"] = cfg_all["min_improvement_margin"]
 
         winner_uid, winner_score = await scoring_module.process_epoch(cfg, period, uid_to_data, str(bench_scores_path))
         # Persist winner: overwrite each run
