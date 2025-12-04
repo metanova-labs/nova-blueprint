@@ -91,7 +91,12 @@ def calculate_final_scores(
     return score_dict
 
 
-def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]], current_epoch: int) -> Optional[int]:
+def determine_winner(
+    score_dict: dict[int, dict[str, list[list[float]]]],
+    current_epoch: int,
+    prev_winner_uid: Optional[int] = None,
+    min_improvement_margin: Optional[float] = None,
+) -> Optional[int]:
     """
     Determines the winning UID based on final score.
     In case of ties, earliest submission time is used as the tiebreaker.
@@ -150,17 +155,42 @@ def determine_winner(score_dict: dict[int, dict[str, list[list[float]]]], curren
         bt.logging.info("No valid winner found (all scores -inf or no submissions).")
         return None
     
-    # Select winner from each model
-    if best_uids:
-        #if len(best_uids) == 1:
-        #winner_block = score_dict[best_uids[0]].get('block_submitted')
-        #current_epoch = winner_block // 361 if winner_block else None
-        bt.logging.info(f"Epoch {current_epoch} winner: UID={best_uids[0]}, winning_score={best_score}")
-        winner = best_uids[0]
-        # else:
-        #     winner = tie_breaker(best_uids, best_score)
-    else:
-        winner = None
+    # Baseline winner (highest score)
+    winner = best_uids[0] if best_uids else None
+
+    # Prefer previous winner unless best improves by the configured margin
+    if (
+        winner is not None
+        and prev_winner_uid is not None
+        and prev_winner_uid in score_dict
+        and 'ps_final_score' in score_dict[prev_winner_uid]
+    ):
+        baseline = float(score_dict[prev_winner_uid]['ps_final_score'])
+        margin = float(min_improvement_margin)
+        if winner != prev_winner_uid:
+            required = baseline * (1.0 + margin)
+            
+            if baseline == 0.0:
+                improvement_pct = float('inf') if best_score > 0.0 else 0.0
+            else:
+                improvement_pct = ((best_score - baseline) / abs(baseline)) * 100.0
+            if best_score < required:
+                bt.logging.info(
+                    f"Previous winner retained: baseline={baseline:.6f}, best={best_score:.6f}, "
+                    f"improvement={improvement_pct:.2f}% < threshold={margin*100.0:.2f}%"
+                )
+                winner = prev_winner_uid
+                best_score = baseline
+            else:
+                bt.logging.info(
+                    f"New winner beats previous: baseline={baseline:.6f}, best={best_score:.6f}, "
+                    f"improvement={improvement_pct:.2f}% >= threshold={margin*100.0:.2f}%"
+                )
+        else:
+            bt.logging.info("Previous winner remains highest scorer")
+
+    if winner is not None:
+        bt.logging.info(f"Epoch {current_epoch} winner: UID={winner}, winning_score={best_score}")
     
     return winner
     

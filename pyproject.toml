@@ -17,4 +17,5 @@ dependencies = [
   "scikit-learn==1.6.1",
   "fair-esm==2.0.0",
   "psycopg2-binary==2.9.9",
+  "minio==7.2.3",
 ]

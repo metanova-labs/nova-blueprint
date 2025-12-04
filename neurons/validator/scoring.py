@@ -95,7 +95,9 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict, scored_sam
         )
 
         # Determine winner
-        winner = determine_winner(score_dict, current_epoch)
+        prev_winner_uid = config.get("prev_winner_uid")
+        min_improvement_margin = float(config["min_improvement_margin"])
+        winner = determine_winner(score_dict, current_epoch, prev_winner_uid=prev_winner_uid, min_improvement_margin=min_improvement_margin)
 
         # Yield so ws heartbeats can run before the next RPC
         await asyncio.sleep(0)

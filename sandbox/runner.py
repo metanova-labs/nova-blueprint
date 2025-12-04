@@ -39,14 +39,17 @@ def prepare_workdir(source_dir: Path, challenge_params: dict, dest_dir: Optional
 
     if not (source_dir / "miner.py").is_file():
         raise FileNotFoundError(f"miner.py not found in {source_dir}")
-    for entry in source_dir.iterdir():
-        if entry.name in {".git", ".hg", ".svn", "__pycache__"}:
-            continue
-        dest = workdir / entry.name
-        if entry.is_dir():
-            shutil.copytree(entry, dest, dirs_exist_ok=True)
-        else:
-            shutil.copy2(entry, dest)
+
+    # If source_dir and workdir are different, copy source into workdir.
+    if source_dir.resolve() != workdir.resolve():
+        for entry in source_dir.iterdir():
+            if entry.name in {".git", ".hg", ".svn", "__pycache__"}:
+                continue
+            dest = workdir / entry.name
+            if entry.is_dir():
+                shutil.copytree(entry, dest, dirs_exist_ok=True)
+            else:
+                shutil.copy2(entry, dest)
 
     with open(workdir / "input.json", "w", encoding="utf-8") as f:
         json.dump(challenge_params, f)
