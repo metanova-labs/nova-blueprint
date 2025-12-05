@@ -277,6 +277,20 @@ def run_job(
                 result_obj = raw["result"]
             elif isinstance(raw, dict):
                 result_obj = raw
+            # Persist benchmark scores before cleanup 
+            if int(miner.uid) == -1:
+                try:
+                    src_scores = outdir / "all_scores_0.json"
+                    if src_scores.exists():
+                        results_dir = Path("/data/results").resolve()
+                        results_dir.mkdir(parents=True, exist_ok=True)
+                        dst_scores = results_dir / f"period_{period}_benchmark_all_scores_0.json"
+                        shutil.copy2(src_scores, dst_scores)
+                        bt.logging.info(f"benchmark: saved scores to {dst_scores}")
+                except Exception as copy_err:
+                    bt.logging.warning(
+                        f"benchmark: failed to persist scores: {type(copy_err).__name__}: {copy_err}"
+                    )
         except Exception:
             result_obj = None
 
@@ -372,9 +386,7 @@ async def main() -> int:
         prev_winner_uid = None
         prev_snapshot_epoch = None
 
-    bench_owner = m.group("owner")
-    bench_repo = m.group("repo")
-    bench_scores_path = Path("/data/miner_runs") / f"{period}_{bench_owner}_{bench_repo}_-1" / "out" / "all_scores_0.json"
+    bench_scores_path = Path("/data/results") / f"period_{period}_benchmark_all_scores_0.json"
 
     try:
         metagraph, subtensor = await call_st(subtensor, network, lambda st: st.metagraph(netuid), timeout_s=10)
