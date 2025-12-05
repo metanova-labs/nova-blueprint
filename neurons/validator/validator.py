@@ -359,6 +359,16 @@ async def main() -> int:
 
     block_hash, subtensor = await call_st(subtensor, network, lambda st: st.determine_block_hash(current_block), timeout_s=10)
     challenge_params = build_challenge_params(str(block_hash))
+    # Persist the exact input used for this period
+    try:
+        results_dir = Path("/data/results").resolve()
+        results_dir.mkdir(parents=True, exist_ok=True)
+        input_path = results_dir / f"period_{period}_input.json"
+        with input_path.open("w", encoding="utf-8") as f:
+            json.dump(challenge_params, f, separators=(",", ":"))
+        bt.logging.info(f"saved period input to {input_path}")
+    except Exception as e:
+        bt.logging.warning(f"failed to persist period input: {type(e).__name__}: {e}")
 
     try:
         m = COMMITMENT_REGEX.match(BENCHMARK_GITHUB)
