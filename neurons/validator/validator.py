@@ -162,9 +162,6 @@ def upload_snapshots_for_epoch(miners: List[Miner], epoch: int) -> List[Miner]:
     successful_miners: List[Miner] = []
     for miner in miners:
         try:
-            bt.logging.info(
-                f"snapshot: uploading {miner.owner}/{miner.repo}@{miner.branch} uid={miner.uid} epoch={epoch}"
-            )
             upload_miner_snapshot(
                 owner=miner.owner,
                 repo=miner.repo,
@@ -172,9 +169,12 @@ def upload_snapshots_for_epoch(miners: List[Miner], epoch: int) -> List[Miner]:
                 uid=int(miner.uid),
                 epoch=epoch,
             )
+            bt.logging.info(
+                f"snapshot: uploaded {miner.owner}/{miner.repo}@{miner.branch} uid={miner.uid} epoch={epoch}"
+            )
             successful_miners.append(miner)
         except Exception as e:
-            bt.logging.error(
+            bt.logging.warning(
                 f"snapshot: upload failed for uid={miner.uid} {miner.owner}/{miner.repo}@{miner.branch}: "
                 f"{type(e).__name__}: {e}"
             )
@@ -264,9 +264,12 @@ def run_job(
         runner.ensure_docker_image()
 
         workdir, outdir = runner.prepare_workdir(miner_dir, challenge_params, dest_dir=dest)
-        bt.logging.info(f"cloning/running {miner.owner}/{miner.repo}@{miner.branch} uid={miner.uid} workdir={workdir}")
+        is_current_winner = snapshot_epoch is not None
+        start_prefix = "run started for current winner" if is_current_winner else "run started for"
+        start_msg = f"{start_prefix} uid={miner.uid} repo={miner.owner}/{miner.repo}@{miner.branch}"
+        bt.logging.info(start_msg)
         code, output = runner.run_container(workdir, outdir, period=period, uid=int(miner.uid))
-        bt.logging.info(f"run finished uid={miner.uid} exit={code} log={outdir / 'log.txt'} result={outdir / 'result.json'}")
+        bt.logging.info(f"run finished uid={miner.uid} exit={code}")
         try:
             with open(outdir / "result.json", "r", encoding="utf-8") as f:
                 raw = json.load(f)
@@ -283,12 +286,10 @@ def run_job(
         if repo_dir is not None:
             try:
                 shutil.rmtree(repo_dir, ignore_errors=True)
-            except Exception:
-                pass
-        try:
-            bt.logging.info(f"finished uid={miner.uid} workdir={workdir if 'workdir' in locals() else 'n/a'}")
-        except Exception:
-            pass
+            except Exception as cleanup_err:
+                bt.logging.warning(
+                    f"cleanup: failed to remove {repo_dir}: {type(cleanup_err).__name__}: {cleanup_err}"
+                )
 
     write_run_artifacts(runs_root, period, miner, result_obj)
 
