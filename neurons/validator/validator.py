@@ -154,10 +154,12 @@ def inject_previous_winner(miners: List[Miner], prev: Optional[Miner]) -> tuple[
     return updated, int(prev.uid)
 
 
-def upload_snapshots_for_epoch(miners: List[Miner], epoch: int) -> None:
+def upload_snapshots_for_epoch(miners: List[Miner], epoch: int) -> List[Miner]:
     """
     Upload code snapshots for all miners for a single epoch.
+    Returns the miners whose snapshot upload succeeded.
     """
+    successful_miners: List[Miner] = []
     for miner in miners:
         try:
             bt.logging.info(
@@ -170,11 +172,14 @@ def upload_snapshots_for_epoch(miners: List[Miner], epoch: int) -> None:
                 uid=int(miner.uid),
                 epoch=epoch,
             )
+            successful_miners.append(miner)
         except Exception as e:
             bt.logging.error(
                 f"snapshot: upload failed for uid={miner.uid} {miner.owner}/{miner.repo}@{miner.branch}: "
                 f"{type(e).__name__}: {e}"
             )
+    return successful_miners
+    
 def ensure_miner_exists(repo_dir: Path) -> Path:
     miner_path = repo_dir / "miner.py"
     if not miner_path.is_file():
@@ -335,7 +340,7 @@ async def main() -> int:
     miners = gather_parse_and_schedule(submissions)
     bt.logging.info(f"current_block={current_block} submissions={len(submissions)} miners={len(miners)}")
 
-    upload_snapshots_for_epoch(miners, period)
+    miners = upload_snapshots_for_epoch(miners, period)
 
     block_hash, subtensor = await call_st(subtensor, network, lambda st: st.determine_block_hash(current_block), timeout_s=10)
     challenge_params = build_challenge_params(str(block_hash))
