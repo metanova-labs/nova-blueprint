@@ -189,6 +189,10 @@ def ensure_miner_exists(repo_dir: Path) -> Path:
 
 def write_run_artifacts(runs_root: Path, period: int, miner: Miner, result_obj: Optional[Dict]) -> None:
     if result_obj is None:
+        bt.logging.info(
+            f"run artifacts: uid={miner.uid} produced no result object; "
+            f"skipping write to period_{period}_results.jsonl"
+        )
         return None
     results_dir = runs_root
     results_dir.mkdir(parents=True, exist_ok=True)
