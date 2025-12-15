@@ -168,23 +168,21 @@ def determine_winner(
         baseline = float(score_dict[prev_winner_uid]['ps_final_score'])
         margin = float(min_improvement_margin)
         if winner != prev_winner_uid:
-            required = baseline * (1.0 + margin)
-            
-            if baseline == 0.0:
-                improvement_pct = float('inf') if best_score > 0.0 else 0.0
-            else:
-                improvement_pct = ((best_score - baseline) / abs(baseline)) * 100.0
+
+            required = baseline + margin
+            improvement = best_score - baseline
+
             if best_score < required:
                 bt.logging.info(
                     f"Previous winner retained: baseline={baseline:.6f}, best={best_score:.6f}, "
-                    f"improvement={improvement_pct:.2f}% < threshold={margin*100.0:.2f}%"
+                    f"improvement={improvement:.6f} < threshold={margin:.6f}"
                 )
                 winner = prev_winner_uid
                 best_score = baseline
             else:
                 bt.logging.info(
                     f"New winner beats previous: baseline={baseline:.6f}, best={best_score:.6f}, "
-                    f"improvement={improvement_pct:.2f}% >= threshold={margin*100.0:.2f}%"
+                    f"improvement={improvement:.6f} >= threshold={margin:.6f}"
                 )
         else:
             bt.logging.info("Previous winner remains highest scorer")
