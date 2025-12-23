@@ -1,11 +1,37 @@
 import os
 import json
+from pathlib import Path
+
 import bittensor as bt
 from dotenv import load_dotenv
+
+from neurons.validator.code_archive import _resolve_snapshot_key
 
 load_dotenv()
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+
+
+def _get_prev_winner_snapshot_epoch(prev_winner_uid):
+    """
+    Return the snapshot_epoch for the previous winner UID from winner.json,
+    or None if not available/mismatched.
+    """
+    if prev_winner_uid is None:
+        return None
+    try:
+        winner_json_path = Path("/data/results/winner.json")
+        if not winner_json_path.exists():
+            return None
+        with winner_json_path.open("r", encoding="utf-8") as f:
+            prev = json.load(f)
+        prev_uid = int(prev["uid"])
+        prev_snapshot_epoch_val = prev.get("snapshot_epoch")
+        if prev_uid == int(prev_winner_uid) and prev_snapshot_epoch_val is not None:
+            return int(prev_snapshot_epoch_val)
+    except Exception as e:
+        bt.logging.warning(f"Failed to read previous winner snapshot_epoch: {e}")
+    return None
 
 
 async def submit_epoch_results(
@@ -17,6 +43,7 @@ async def submit_epoch_results(
     valid_molecules_by_uid: dict,
     score_dict: dict,
     scored_sample_path: str = os.path.join(BASE_DIR, "all_scores_0.json"),
+    winner_uid=None,
 ) -> bool:
     """
     Submit epoch results to backend API via POST request.
@@ -37,7 +64,31 @@ async def submit_epoch_results(
 
         # Convert integer keys to strings for JSON
         score_dict_str = {str(k): v for k, v in score_dict.items()}
-        uid_to_data_str = {str(k): v for k, v in uid_to_data.items()}
+
+        # Enrich uid_to_data with code_link using the snapshot key.
+        prev_winner_uid = config.get("prev_winner_uid")
+        prev_winner_snapshot_epoch = _get_prev_winner_snapshot_epoch(prev_winner_uid)
+
+        uid_to_data_enriched = {}
+        for uid, data in uid_to_data.items():
+            d = dict(data) if isinstance(data, dict) else data
+            try:
+                epoch_for_uid = epoch_number
+                if (
+                    prev_winner_uid is not None
+                    and int(uid) == int(prev_winner_uid)
+                    and prev_winner_snapshot_epoch is not None
+                ):
+                    epoch_for_uid = prev_winner_snapshot_epoch
+
+                key = _resolve_snapshot_key(epoch=epoch_for_uid, uid=int(uid))
+                if key:
+                    d["code_link"] = key
+            except Exception as e:
+                bt.logging.warning(f"Failed to resolve snapshot key for uid={uid}: {e}")
+            uid_to_data_enriched[uid] = d
+
+        uid_to_data_str = {str(k): v for k, v in uid_to_data_enriched.items()}
         valid_molecules_str = {str(k): v for k, v in valid_molecules_by_uid.items()}
 
         # Build POST payload
@@ -57,6 +108,7 @@ async def submit_epoch_results(
             "uid_to_data": uid_to_data_str,
             "valid_molecules_by_uid": valid_molecules_str,
             "scored_sample_data": scored_sample_data,
+            "winner_uid": winner_uid,
         }
 
         # Send via BackendAPI
