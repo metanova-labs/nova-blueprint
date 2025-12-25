@@ -83,6 +83,8 @@ async def submit_epoch_results(
 
                 key = _resolve_snapshot_key(epoch=epoch_for_uid, uid=int(uid))
                 if key:
+                    if key.endswith(".tar.gz"):
+                        key = key[: -len(".tar.gz")]
                     d["code_link"] = key
             except Exception as e:
                 bt.logging.warning(f"Failed to resolve snapshot key for uid={uid}: {e}")
