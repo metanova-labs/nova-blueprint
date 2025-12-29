@@ -1,7 +1,9 @@
 from typing import Any, Dict, Optional
-import bittensor as bt
-import aiohttp
+import json
 import os
+
+import aiohttp
+import bittensor as bt
 
 
 class BackendAPI:
@@ -65,8 +67,24 @@ class BackendAPI:
                 json=payload,
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as response:
-                response.raise_for_status()
-                bt.logging.info("Successfully submitted epoch results")
+                # Read response body so we can log useful details on failure.
+                raw_text = await response.text()
+                try:
+                    body: Any = json.loads(raw_text) if raw_text else None
+                except Exception:
+                    body = raw_text or None
+
+                if response.status >= 400:
+                    bt.logging.error(
+                        f"Error submitting epoch results: "
+                        f"{response.status} {response.reason}, "
+                        f"body={str(body)[:500]}"
+                    )
+                    return False
+
+                bt.logging.info(
+                    f"Successfully submitted epoch results: status={response.status}"
+                )
                 return True
         except aiohttp.ClientError as e:
             bt.logging.error(f"Error submitting epoch results: {e}")
