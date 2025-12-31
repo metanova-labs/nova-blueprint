@@ -116,6 +116,7 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict, scored_sam
                         valid_molecules_by_uid=valid_molecules_by_uid,
                         score_dict=score_dict,
                         scored_sample_path=scored_sample_path,
+                        winner_uid=winner,
                     )
                     if status:
                         bt.logging.info("Submitted results to dashboard DB")
