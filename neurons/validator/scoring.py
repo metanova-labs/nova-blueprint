@@ -21,7 +21,11 @@ if NOVA_DIR not in sys.path:
 from utils.proteins import get_sequence_from_protein_code, get_code_from_protein_sequence
 from neurons.validator.validity import validate_molecules_and_calculate_entropy
 from PSICHIC.wrapper import PsichicWrapper
-from neurons.validator.ranking import calculate_final_scores, determine_winner
+from neurons.validator.ranking import (
+    calculate_final_scores,
+    determine_winner,
+    compute_effective_min_improvement_margin,
+)
 from neurons.validator.save_data import submit_epoch_results
 
 # Global variable to store PSICHIC instance - will be set by validator.py
@@ -96,8 +100,23 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict, scored_sam
 
         # Determine winner
         prev_winner_uid = config.get("prev_winner_uid")
-        min_improvement_margin = float(config["min_improvement_margin"])
-        winner = determine_winner(score_dict, current_epoch, prev_winner_uid=prev_winner_uid, min_improvement_margin=min_improvement_margin)
+        base_margin = float(config["min_improvement_margin"])
+        decay_rate = float(config["min_improvement_decay_rate"])
+        snapshot_epoch = config.get("winner_snapshot_epoch")
+        if snapshot_epoch is None:
+            age_epochs = 0
+        else:
+            # competitions since snapshot; first one still uses full margin
+            age_epochs = max(0, int(current_epoch) - int(snapshot_epoch) - 1)
+        min_improvement_margin = compute_effective_min_improvement_margin(
+            base_margin, age_epochs, decay_rate
+        )
+        winner = determine_winner(
+            score_dict,
+            current_epoch,
+            prev_winner_uid=prev_winner_uid,
+            min_improvement_margin=min_improvement_margin,
+        )
 
         # Yield so ws heartbeats can run before the next RPC
         await asyncio.sleep(0)

@@ -34,6 +34,7 @@ def load_config(path: str = os.path.join(BASE_DIR, "config/config.yaml")):
     competition_interval_seconds = run_cfg.get("competition_interval_seconds")
     competition_interval_seconds = int(competition_interval_seconds)
     min_improvement_margin = float(run_cfg["min_improvement_margin"])
+    min_improvement_decay_rate = float(run_cfg["min_improvement_decay_rate"])
 
     return {
         'num_antitargets': num_antitargets,
@@ -47,6 +48,7 @@ def load_config(path: str = os.path.join(BASE_DIR, "config/config.yaml")):
         'time_budget_sec': time_budget_sec,
         'competition_interval_seconds': competition_interval_seconds,
         'min_improvement_margin': min_improvement_margin,
+        'min_improvement_decay_rate': min_improvement_decay_rate,
     }
 
 

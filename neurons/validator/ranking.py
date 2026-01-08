@@ -10,6 +10,18 @@ from typing import Optional
 import bittensor as bt
 
 
+def compute_effective_min_improvement_margin(
+    base_margin: float,
+    age_epochs: int,
+    decay_rate: float,
+    min_margin: float = 0.0,
+) -> float:
+    """Exponential decay of the improvement margin over `age_epochs`."""
+    if decay_rate <= 0.0 or age_epochs <= 0:
+        return max(min_margin, base_margin)
+    return max(min_margin, base_margin * (1.0 - decay_rate) ** age_epochs)
+
+
 def calculate_final_scores(
     score_dict: dict[int, dict[str, list[list[float]]]],
     valid_molecules_by_uid: dict[int, dict[str, list[str]]],
