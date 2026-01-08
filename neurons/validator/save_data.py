@@ -104,7 +104,7 @@ async def submit_epoch_results(
                 "num_molecules": config.get("num_molecules", 0),
                 "min_rotatable_bonds": config.get("min_rotatable_bonds", 0),
                 "max_rotatable_bonds": config.get("max_rotatable_bonds", 0),
-                "entropy_threshold": config.get("entropy_threshold", 0.0),
+                "entropy_min_threshold": config.get("entropy_min_threshold", 0.0),
             },
             "score_dict": score_dict_str,
             "uid_to_data": uid_to_data_str,
