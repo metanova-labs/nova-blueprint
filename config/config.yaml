@@ -24,7 +24,9 @@ run:
   time_budget_sec: 1800
   # One competition every day (UTC-aligned)
   competition_interval_seconds: 86400
-  # Minimum relative improvement required to replace previous winner (e.g., 0.05 = 5%)
+  # Initial minimum absolute improvement required to replace previous winner (e.g., 0.05 ~ 5%)
   min_improvement_margin: 0.05
+  # Relative decay of the improvement margin per epoch/day (e.g., 0.2 = 20% decay -> 80% of previous each epoch)
+  min_improvement_decay_rate: 0.2
 
 
