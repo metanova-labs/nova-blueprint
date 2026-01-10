@@ -7,3 +7,8 @@ data/miner_runs/
 data/results/
 *.log
 __pycache__
+
+.cache/
+debug/
+miner_runs_old/
+scripts/
