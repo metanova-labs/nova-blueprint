@@ -103,11 +103,14 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict, scored_sam
         base_margin = float(config["min_improvement_margin"])
         decay_rate = float(config["min_improvement_decay_rate"])
         snapshot_epoch = config.get("winner_snapshot_epoch")
+        DECAY_START_EPOCH = 20462  # rollout start epoch for decay
         if snapshot_epoch is None:
             age_epochs = 0
         else:
-            # competitions since snapshot; first one still uses full margin
-            age_epochs = max(0, int(current_epoch) - int(snapshot_epoch) - 1)
+            effective_snapshot = int(snapshot_epoch)
+            if DECAY_START_EPOCH is not None:
+                effective_snapshot = max(effective_snapshot, DECAY_START_EPOCH)
+            age_epochs = max(0, int(current_epoch) - effective_snapshot - 1)
         min_improvement_margin = compute_effective_min_improvement_margin(
             base_margin, age_epochs, decay_rate
         )
