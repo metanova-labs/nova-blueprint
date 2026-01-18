@@ -331,6 +331,9 @@ async def main() -> int:
 
     load_dotenv(PROJECT_ROOT / ".env")
 
+    minio_access = os.environ.get("MINIO_ACCESS_KEY", "") or ""
+    is_evaluator = minio_access.endswith("-ro")
+
     network = os.environ.get("SUBTENSOR_NETWORK")
     netuid = int(os.environ.get("NETUID", "68"))
 
@@ -359,7 +362,12 @@ async def main() -> int:
     miners = gather_parse_and_schedule(submissions)
     bt.logging.info(f"current_block={current_block} submissions={len(submissions)} miners={len(miners)}")
 
-    miners = upload_snapshots_for_epoch(miners, period)
+    if is_evaluator:
+        wait_secs = 60
+        bt.logging.info(f"Evaluator mode; waiting {wait_secs}s for code uploads to complete")
+        time.sleep(wait_secs)
+    else:
+        miners = upload_snapshots_for_epoch(miners, period)
 
     block_hash, subtensor = await call_st(subtensor, network, lambda st: st.determine_block_hash(current_block), timeout_s=10)
     challenge_params = build_challenge_params(str(block_hash))
