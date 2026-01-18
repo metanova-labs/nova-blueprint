@@ -31,6 +31,9 @@ BT_WALLET_COLD=your_cold_wallet_name
 BT_WALLET_HOT=your_hotkey_name
 SUBTENSOR_NETWORK=finney
 GITHUB_TOKEN=your_github_pat
+SNAPSHOT_S3_ENDPOINT=s3.metanova-labs.ai
+MINIO_ACCESS_KEY=your_minio_access_key
+MINIO_SECRET_KEY=your_minio_secret_key
 # Optional if your wallets are not in the default location
 # BT_WALLETS_DIR=$HOME/.bittensor/wallets 
 ```
