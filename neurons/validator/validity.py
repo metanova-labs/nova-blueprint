@@ -36,6 +36,15 @@ def validate_molecules_and_calculate_entropy(
         valid_smiles = []
         valid_names = []
         
+        required_num = config.get("num_molecules")
+        if required_num is not None and len(data.get("molecules", [])) != int(required_num):
+            bt.logging.warning(
+                f"UID={uid} submission has wrong molecule count: "
+                f"got={len(data.get('molecules', []))}, required={int(required_num)}"
+            )
+            score_dict[uid]["entropy"] = None
+            continue
+        
         # Check for duplicate molecules in submission
         if len(data["molecules"]) != len(set(data["molecules"])):
             bt.logging.error(f"UID={uid} submission contains duplicate molecules")
