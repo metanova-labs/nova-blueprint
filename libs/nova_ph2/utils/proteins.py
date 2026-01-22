@@ -7,23 +7,22 @@ from datasets import load_dataset
 def get_sequence_from_protein_code(protein_code: str) -> str:
     """
     Get the amino acid sequence for a protein code.
-    First tries to fetch from UniProt API, and if that fails,
-    falls back to searching the Hugging Face dataset.
+    Default: resolve via the Hugging Face dataset.
+    UniProt fetch left out for determinism when uiniprot updates
     """
-    url = f"https://rest.uniprot.org/uniprotkb/{protein_code}.fasta"
-    response = requests.get(url)
+    # Optional UniProt path (disabled by default):
+    # url = f"https://rest.uniprot.org/uniprotkb/{protein_code}.fasta"
+    # response = requests.get(url, timeout=10)
+    # if response.status_code == 200:
+    #     lines = response.text.splitlines()
+    #     sequence_lines = [line.strip() for line in lines if not line.startswith(">")]
+    #     amino_acid_sequence = "".join(sequence_lines)
+    #     if amino_acid_sequence:
+    #         return amino_acid_sequence
+    # bt.logging.info(
+    #     f"Failed to retrieve sequence for {protein_code} from UniProt API. Trying Hugging Face dataset."
+    # )
 
-    if response.status_code == 200:
-        lines = response.text.splitlines()
-        sequence_lines = [line.strip() for line in lines if not line.startswith('>')]
-        amino_acid_sequence = ''.join(sequence_lines)
-        # Check if the sequence is empty
-        if not amino_acid_sequence:
-            bt.logging.warning(f"Retrieved empty sequence for {protein_code} from UniProt API")
-        else:
-            return amino_acid_sequence
-    
-    bt.logging.info(f"Failed to retrieve sequence for {protein_code} from UniProt API. Trying Hugging Face dataset.")
     try:
         dataset = load_dataset("Metanova/Proteins", split="train")
         
