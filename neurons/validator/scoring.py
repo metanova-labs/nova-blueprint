@@ -114,6 +114,7 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict, scored_sam
         min_improvement_margin = compute_effective_min_improvement_margin(
             base_margin, age_epochs, decay_rate
         )
+        config["threshold_to_win"] = float(min_improvement_margin)
         winner = determine_winner(
             score_dict,
             current_epoch,
