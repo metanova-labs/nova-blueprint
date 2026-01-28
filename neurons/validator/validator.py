@@ -463,6 +463,7 @@ async def main() -> int:
         cfg["min_improvement_margin"] = cfg_all["min_improvement_margin"]
         cfg["min_improvement_decay_rate"] = cfg_all["min_improvement_decay_rate"]
         cfg["winner_snapshot_epoch"] = prev_snapshot_epoch
+        cfg["time_budget_sec"] = cfg_all.get("time_budget_sec", 0)
 
         winner_uid, winner_score = await scoring_module.process_epoch(cfg, period, uid_to_data, str(bench_scores_path))
         # Persist winner: overwrite each run
