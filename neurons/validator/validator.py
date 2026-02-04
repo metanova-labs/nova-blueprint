@@ -34,6 +34,19 @@ COMMITMENT_REGEX = re.compile(
 
 BENCHMARK_GITHUB = os.environ.get("BENCHMARK_GITHUB", "nova68miner/random_miner@main")
 
+BENCHMARK_UID_RANDOM = -1
+BENCHMARK_UID_THOMPSON = -2
+
+
+def _benchmark_snapshot_name(uid: int) -> str:
+    if int(uid) == BENCHMARK_UID_RANDOM:
+        return "brute_force"
+    if int(uid) == BENCHMARK_UID_THOMPSON:
+        return "thompson_sampling"
+    raise ValueError(f"Unknown benchmark uid={uid} (expected {BENCHMARK_UID_RANDOM} or {BENCHMARK_UID_THOMPSON})")
+
+
+
 @dataclass
 class Miner:
     uid: int
@@ -233,10 +246,15 @@ def run_job(
         safe_repo = f"{miner.owner}_{miner.repo}".replace("/", "_")
         dest = work_root / f"{period}_{safe_repo}_{miner.uid}"
 
-        if int(miner.uid) == -1:
+        if int(miner.uid) < 0:
             try:
-                repo_dir = download_benchmark_snapshot(work_root=work_root, dest_dir=dest)
-                bt.logging.info("using benchmark snapshot")
+                snapshot_name = _benchmark_snapshot_name(int(miner.uid))
+                repo_dir = download_benchmark_snapshot(
+                    work_root=work_root, dest_dir=dest, name=snapshot_name
+                )
+                bt.logging.info(
+                    f"using benchmark snapshot name={snapshot_name} uid={miner.uid}"
+                )
             except Exception as e:
                 bt.logging.error(f"benchmark snapshot download failed: {type(e).__name__}: {e}")
                 return
@@ -387,7 +405,7 @@ async def main() -> int:
         if not m:
             raise ValueError(f"Invalid BENCHMARK_GITHUB: {BENCHMARK_GITHUB}")
         benchmark = Miner(
-            uid=-1,
+            uid=BENCHMARK_UID_RANDOM,
             block_number=current_block,
             raw=BENCHMARK_GITHUB,
             owner=m.group("owner"),
@@ -399,6 +417,21 @@ async def main() -> int:
         run_job(benchmark, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
     except Exception as e:
         bt.logging.error(f"benchmark run failed: {type(e).__name__}: {e}")
+
+    try:
+        ts_benchmark = Miner(
+            uid=BENCHMARK_UID_THOMPSON,
+            block_number=current_block,
+            raw="benchmark/thompson_sampling@minio",
+            owner="benchmark",
+            repo="thompson_sampling",
+            branch="minio",
+            hotkey="benchmark",
+        )
+        bt.logging.info(f"thompson_sampling: running snapshot (uid={BENCHMARK_UID_THOMPSON})")
+        run_job(ts_benchmark, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
+    except Exception as e:
+        bt.logging.error(f"thompson_sampling run failed: {type(e).__name__}: {e}")
 
     prev_winner_data = get_previous_winner(current_block)
     if prev_winner_data is not None:
@@ -447,7 +480,7 @@ async def main() -> int:
                         continue
                     rec = json.loads(line)
                     uid = int(rec["uid"]) if "uid" in rec else None
-                    if uid is None or uid == -1:
+                    if uid is None or uid < 0:
                         continue
                     molecules = rec.get("result", {}).get("molecules", [])
                     uid_to_data[uid] = {
@@ -465,7 +498,12 @@ async def main() -> int:
         cfg["winner_snapshot_epoch"] = prev_snapshot_epoch
         cfg["time_budget_sec"] = cfg_all.get("time_budget_sec", 0)
 
-        winner_uid, winner_score = await scoring_module.process_epoch(cfg, period, uid_to_data, str(bench_scores_path))
+        winner_uid, winner_score = await scoring_module.process_epoch(
+            cfg,
+            period,
+            uid_to_data,
+            str(bench_scores_path),
+        )
         # Persist winner: overwrite each run
         try:
             if isinstance(winner_uid, int):

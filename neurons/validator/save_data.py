@@ -44,6 +44,7 @@ async def submit_epoch_results(
     score_dict: dict,
     scored_sample_path: str = os.path.join(BASE_DIR, "all_scores_0.json"),
     winner_uid=None,
+    benchmarks: list[dict] | None = None,
 ) -> bool:
     """
     Submit epoch results to backend API via POST request.
@@ -114,6 +115,8 @@ async def submit_epoch_results(
             "scored_sample_data": scored_sample_data,
             "winner_uid": winner_uid,
         }
+        if benchmarks:
+            payload["benchmarks"] = benchmarks
 
         # Send via BackendAPI
         api = BackendAPI()
