@@ -39,11 +39,7 @@ def _build_thompson_benchmark_payload(
     target_sequences: list[str],
     antitarget_sequences: list[str],
 ) -> list[dict]:
-    """
-    Minimal Option A: load Thompson Sampling output from /data/results, score it with the same
-    PSICHIC stack, and return a backend-ready benchmark payload entry:
-      [{"name": "thompson_sampling", "github_data": None, "scored_molecules": [[name, score], ...]}]
-    """
+
     try:
         jsonl_path = os.path.join(
             "/data/results", f"period_{int(epoch_number)}_results.jsonl"
