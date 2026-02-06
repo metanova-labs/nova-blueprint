@@ -31,7 +31,102 @@ from neurons.validator.save_data import submit_epoch_results
 # Global variable to store PSICHIC instance - will be set by validator.py
 psichic = None
 
-async def process_epoch(config, epoch_number: int, uid_to_data: dict, scored_sample_path: str):
+def _build_thompson_benchmark_payload(
+    *,
+    epoch_number: int,
+    config: dict,
+    current_epoch: int,
+    target_sequences: list[str],
+    antitarget_sequences: list[str],
+) -> list[dict]:
+
+    try:
+        jsonl_path = os.path.join(
+            "/data/results", f"period_{int(epoch_number)}_results.jsonl"
+        )
+        if not os.path.exists(jsonl_path):
+            return []
+
+        # Pull TS molecules directly from the cumulative JSONL results file (uid=-2).
+        molecules: list[str] = []
+        with open(jsonl_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                try:
+                    uid = int(rec.get("uid"))
+                except Exception:
+                    continue
+                if uid != -2:
+                    continue
+                res = rec.get("result") or {}
+                if isinstance(res, dict):
+                    mols = res.get("molecules", [])
+                    if isinstance(mols, list):
+                        molecules = mols  # keep last occurrence if duplicated
+
+        if not isinstance(molecules, list) or not molecules:
+            return []
+
+        # Use a negative UID that is never part of miner ranking/submissions.
+        uid = -2
+        github_data = None
+        bench_uid_to_data = {uid: {"molecules": molecules, "raw": github_data}}
+        bench_score_dict = {
+            uid: {
+                "ps_target_scores": [[] for _ in range(len(config.get("target_codes", [])))],
+                "ps_antitarget_scores": [[] for _ in range(len(config.get("antitarget_codes", [])))],
+                "entropy": None,
+                "github_data": github_data,
+            }
+        }
+
+        bench_valid = validate_molecules_and_calculate_entropy(
+            uid_to_data=bench_uid_to_data,
+            score_dict=bench_score_dict,
+            config=config,
+            allowed_reaction=config.get("allowed_reaction"),
+        )
+        if uid not in bench_valid:
+            return []
+
+        score_all_proteins_psichic(
+            target_proteins=target_sequences,
+            antitarget_proteins=antitarget_sequences,
+            score_dict=bench_score_dict,
+            valid_molecules_by_uid=bench_valid,
+            uid_to_data=bench_uid_to_data,
+            batch_size=32,
+        )
+        bench_score_dict = calculate_final_scores(
+            bench_score_dict, bench_valid, config, current_epoch
+        )
+
+        names = bench_valid[uid].get("names", [])
+        combined = bench_score_dict.get(uid, {}).get("ps_combined_molecule_scores", [])
+        n = min(len(names), len(combined))
+        scored_molecules = [[str(names[j]), float(combined[j])] for j in range(n)]
+        if not scored_molecules:
+            return []
+        return [{"name": "thompson_sampling", "github_data": None, "scored_molecules": scored_molecules}]
+    except Exception as e:
+        bt.logging.warning(
+            f"failed to build thompson_sampling benchmark payload: {type(e).__name__}: {e}"
+        )
+        return []
+
+
+async def process_epoch(
+    config,
+    epoch_number: int,
+    uid_to_data: dict,
+    scored_sample_path: str,
+):
     """
     Process a single epoch end-to-end.
     """
@@ -130,6 +225,13 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict, scored_sam
             if not bool(config.get("test_mode")):
                 submit_url = os.environ.get('SUBMIT_RESULTS_URL')
                 if submit_url:
+                    benchmarks_payload = _build_thompson_benchmark_payload(
+                        epoch_number=epoch_number,
+                        config=config,
+                        current_epoch=current_epoch,
+                        target_sequences=target_sequences,
+                        antitarget_sequences=antitarget_sequences,
+                    )
                     status = await submit_epoch_results(
                         config=config,
                         epoch_number=epoch_number,
@@ -140,6 +242,7 @@ async def process_epoch(config, epoch_number: int, uid_to_data: dict, scored_sam
                         score_dict=score_dict,
                         scored_sample_path=scored_sample_path,
                         winner_uid=winner,
+                        benchmarks=benchmarks_payload,
                     )
                     if status:
                         bt.logging.info("Submitted results to dashboard DB")

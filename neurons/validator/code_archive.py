@@ -11,7 +11,10 @@ import shutil
 
 SNAPSHOT_BUCKET = "blueprint-code-archive"
 MAX_REPO_MB = 100
-BENCHMARK_OBJECT_KEY = "benchmarks/brute_force.tar.gz"
+BENCHMARK_OBJECT_KEYS: Dict[str, str] = {
+    "brute_force": "benchmarks/brute_force.tar.gz",
+    "thompson_sampling": "benchmarks/thompson_sampling.tar.gz",
+}
 
 
 def _create_minio_client() -> Minio:
@@ -195,18 +198,29 @@ def build_snapshot_archive(repo_dir: Path, archive_path: Path) -> Path:
     return archive_path
 
 
-def download_benchmark_snapshot(work_root: Path, dest_dir: Path) -> Path:
+def download_benchmark_snapshot(
+    work_root: Path,
+    dest_dir: Path,
+    name: str,
+) -> Path:
     """
-    Download and extract the benchmark snapshot into dest_dir.
+    Download and extract a benchmark snapshot into dest_dir.
     """
     client = _create_minio_client()
     bucket = SNAPSHOT_BUCKET
 
+    object_key = BENCHMARK_OBJECT_KEYS.get(str(name))
+    if not object_key:
+        raise ValueError(
+            f"Unknown benchmark snapshot name '{name}'. "
+            f"Known: {sorted(BENCHMARK_OBJECT_KEYS.keys())}"
+        )
+
     work_root = work_root.resolve()
     work_root.mkdir(parents=True, exist_ok=True)
-    archive_path = work_root / "benchmark_brute_force.tar.gz"
+    archive_path = work_root / f"benchmark_{name}.tar.gz"
 
-    client.fget_object(bucket, BENCHMARK_OBJECT_KEY, str(archive_path))
+    client.fget_object(bucket, object_key, str(archive_path))
 
     dest_dir = dest_dir.resolve()
     if dest_dir.exists():
