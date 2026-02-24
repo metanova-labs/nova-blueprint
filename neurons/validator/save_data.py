@@ -83,6 +83,7 @@ async def submit_epoch_results(
                 d["code_link"] = f"{int(epoch_for_uid)}/{int(uid)}"
             except Exception as e:
                 bt.logging.warning(f"Failed to resolve snapshot key for uid={uid}: {e}")
+            d["submission_name"] = d.get("submission_name")
             uid_to_data_enriched[uid] = d
 
         uid_to_data_str = {str(k): v for k, v in uid_to_data_enriched.items()}

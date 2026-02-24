@@ -45,6 +45,7 @@ class Miner:
     submitted_at_utc: int
     hotkey: str
     coldkey: Optional[str] = None
+    submission_name: Optional[str] = None
 
 
 async def call_st(subtensor, network: Optional[str], rpc_fn, timeout_s: int = 10):
@@ -89,24 +90,20 @@ def fetch_submission_miners(period: int) -> List[Miner]:
 
     miners: List[Miner] = []
     for item in items:
-        try:
-            uid = int(item["uid"])
-            epoch_val = int(item.get("epoch", period))
-            hotkey = str(item.get("hotkey", ""))
-            coldkey = item.get("coldkey")
-            submitted_at_utc = int(item.get("submitted_at_utc", 0) or 0)
-            if not hotkey:
-                continue
-            miners.append(
-                Miner(
-                    uid=uid,
-                    submitted_at_utc=submitted_at_utc,
-                    hotkey=hotkey,
-                    coldkey=str(coldkey) if coldkey else None,
-                )
+        uid = int(item["uid"])
+        hotkey = str(item["hotkey"])
+        coldkey = item["coldkey"]
+        submitted_at_utc = int(item["submitted_at_utc"])
+        submission_name = item["submission_name"]
+        miners.append(
+            Miner(
+                uid=uid,
+                submitted_at_utc=submitted_at_utc,
+                hotkey=hotkey,
+                coldkey=str(coldkey) if coldkey is not None else None,
+                submission_name=str(submission_name) if submission_name is not None else None,
             )
-        except Exception:
-            continue
+        )
     miners.sort(key=lambda m: m.uid)
     return miners
 
@@ -134,6 +131,7 @@ def get_previous_winner() -> Optional[tuple[Miner, int]]:
             submitted_at_utc=submitted_at_utc_val,
             hotkey=hotkey_val,
             coldkey=str(coldkey_val) if coldkey_val else None,
+            submission_name=last_win.get("submission_name"),
         )
         return prev_winner, snapshot_epoch_int
     except Exception as e:
@@ -175,6 +173,7 @@ def write_run_artifacts(runs_root: Path, period: int, miner: Miner, result_obj: 
         "submitted_at_utc": miner.submitted_at_utc,
         "coldkey": miner.coldkey,
         "hotkey": miner.hotkey,
+        "submission_name": miner.submission_name,
         "result": result_obj,
     }
     try:
@@ -395,6 +394,7 @@ async def main() -> int:
                         "github_data": None,
                         "hotkey": rec.get("hotkey"),
                         "coldkey": rec.get("coldkey"),
+                        "submission_name": rec.get("submission_name"),
                         "submitted_at_utc": int(rec.get("submitted_at_utc", 0) or 0),
                     }
         cfg = dict(challenge_params.get("config", {}))
@@ -438,6 +438,7 @@ async def main() -> int:
                     "uid": winner_uid,
                     "hotkey": win.get("hotkey"),
                     "coldkey": win.get("coldkey"),
+                    "submission_name": win.get("submission_name"),
                     "submitted_at_utc": int(win.get("submitted_at_utc", 0) or 0),
                     "code_link": winner_code_link,
                     "score": winner_score,
