@@ -6,3 +6,8 @@ from .molecules import (
 )
 from .proteins import get_sequence_from_protein_code, get_code_from_protein_sequence
 from .reactions import get_total_reactions, is_reaction_allowed
+from .submission_uploader import (
+    UploadResult,
+    submit_from_github_url,
+    submit_from_local_path,
+)
