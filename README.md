@@ -74,4 +74,34 @@ Recommendation: keep `/output/result.json` up‑to‑date during the run so the 
 
 ---
 
+### Miner submission SDK
+
+Use the SDK to upload signed code submissions for the competition.
+
+```python
+from utils.submission_uploader import submit_from_local_path, submit_from_github_url
+
+result = submit_from_local_path(
+    local_path="/path/to/miner_project_dir", 
+    wallet_name="my_wallet",
+    hotkey_name="my_hotkey",
+    submission_name="dock-sense2",  # name appears on the dashboard
+)
+
+# or
+result = submit_from_github_url(
+    github_url="https://github.com/<owner>/<repo>",
+    wallet_name="my_wallet",
+    hotkey_name="my_hotkey",
+    submission_name="dock-sense2",  # name appears on the dashboard
+)
+
+print(result.status_code, result.ok, result.request_id, result.body)
+```
+
+Notes:
+- Submissions must be signed by a hotkey that is registered on subnet 68 (this wallet will receive emissions if your submission wins).
+- One active submission slot exists per UID per epoch; re-submitting in the same epoch overwrites the previous code upload.
+---
+
 
