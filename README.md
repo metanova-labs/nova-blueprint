@@ -3,7 +3,7 @@
 ML‑driven drug discovery on Bittensor.
 NOVA Blueprint powers SN68 by running competitive cycles that explore vast chemical spaces, collect candidate molecules, and iteratively build on the best‑performing approaches.
 
-This codebase implements the SN68 validator scheduler and the sandboxed miner runner: it pulls miner submissions from‑chain, generates per‑cycle challenges, executes miners in an isolated Docker sandbox within a fixed time budget, and collects `/output/result.json` for scoring.
+This codebase implements the SN68 validator scheduler and the sandboxed miner runner: it pulls miner snapshots from the submission API + MinIO archive, generates per‑cycle challenges, executes miners in an isolated Docker sandbox within a fixed time budget, and collects `/output/result.json` for scoring.
 
 ### System Requirements (validators)
 - Docker with docker compose plugin
@@ -30,10 +30,11 @@ cp .env.example .env
 BT_WALLET_COLD=your_cold_wallet_name
 BT_WALLET_HOT=your_hotkey_name
 SUBTENSOR_NETWORK=finney
-GITHUB_TOKEN=your_github_pat
 SNAPSHOT_S3_ENDPOINT=s3.metanova-labs.ai
 MINIO_ACCESS_KEY=your_minio_access_key
 MINIO_SECRET_KEY=your_minio_secret_key
+SUBMISSION_API_URL=https://submission-api.metanova-labs.ai
+SUBMISSION_API_KEY=your_submission_read_api_key
 # Optional if your wallets are not in the default location
 # BT_WALLETS_DIR=$HOME/.bittensor/wallets 
 ```
@@ -71,6 +72,36 @@ Timing: You have a fixed time budget to generate the highest‑scoring set of mo
 Where it’s defined: `config/config.yaml` → `run.time_budget_sec` (default 1800s).  
 Recommendation: keep `/output/result.json` up‑to‑date during the run so the latest results are captured when the sandbox exits.
 
+---
+
+### Miner submission SDK
+
+Use the SDK to upload signed code submissions for the competition.
+
+```python
+from utils.submission_uploader import submit_from_local_path, submit_from_github_url
+
+result = submit_from_local_path(
+    local_path="/path/to/miner_project_dir", 
+    wallet_name="my_wallet",
+    hotkey_name="my_hotkey",
+    submission_name="dock-sense2",  # name appears on the dashboard
+)
+
+# or
+result = submit_from_github_url(
+    github_url="https://github.com/<owner>/<repo>",
+    wallet_name="my_wallet",
+    hotkey_name="my_hotkey",
+    submission_name="dock-sense2",  # name appears on the dashboard
+)
+
+print(result.status_code, result.ok, result.request_id, result.body)
+```
+
+Notes:
+- Submissions must be signed by a hotkey that is registered on subnet 68 (this wallet will receive emissions if your submission wins).
+- One active submission slot exists per UID per epoch; re-submitting in the same epoch overwrites the previous code upload.
 ---
 
 

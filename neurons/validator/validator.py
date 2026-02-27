@@ -1,13 +1,12 @@
 import datetime as dt
 import json
 import os
-import re
 import shutil
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional
 from dotenv import load_dotenv
 import asyncio
 
@@ -19,20 +18,13 @@ from neurons.validator import scoring as scoring_module
 from neurons.validator.code_archive import (
     download_and_extract_snapshot,
     download_benchmark_snapshot,
-    upload_miner_snapshot,
 )
 from config.config_loader import load_config
 
-from neurons.validator.commitments import get_commitments
 import bittensor as bt
+import requests
 
-"""fetch commitments, run miners in sandbox, persist results."""
-
-COMMITMENT_REGEX = re.compile(
-    r"^(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)@(?P<branch>[\w./-]+)$"
-)
-
-BENCHMARK_GITHUB = os.environ.get("BENCHMARK_GITHUB", "nova68miner/random_miner@main")
+"""fetch submission records, run miners in sandbox, persist results."""
 
 BENCHMARK_UID_RANDOM = -1
 BENCHMARK_UID_THOMPSON = -2
@@ -50,25 +42,10 @@ def _benchmark_snapshot_name(uid: int) -> str:
 @dataclass
 class Miner:
     uid: int
-    block_number: int
-    raw: str
-    owner: str
-    repo: str
-    branch: str
+    submitted_at_utc: int
     hotkey: str
     coldkey: Optional[str] = None
-
-
-def parse_commitment(raw: str, uid: int, block_number: int, hotkey: str) -> Optional[Miner]:
-    match = COMMITMENT_REGEX.match(raw.strip())
-    if not match:
-        return None
-    owner = match.group("owner")
-    repo = match.group("repo")
-    branch = match.group("branch")
-    if len(owner) == 0 or len(repo) == 0 or len(branch) == 0:
-        return None
-    return Miner(uid=uid, block_number=block_number, raw=raw, owner=owner, repo=repo, branch=branch, hotkey=hotkey)
+    submission_name: Optional[str] = None
 
 
 async def call_st(subtensor, network: Optional[str], rpc_fn, timeout_s: int = 10):
@@ -88,46 +65,50 @@ async def call_st(subtensor, network: Optional[str], rpc_fn, timeout_s: int = 10
         return res, st
 
 
-async def fetch_commitments_from_chain(network: Optional[str], netuid: int, min_block: int, max_block: int) -> List[Tuple[int, int, str, str]]:
-    """Fetch plaintext commitments within a block window (one per UID)."""
-    subtensor = bt.async_subtensor(network=network)
-    await subtensor.initialize()
-    metagraph, subtensor = await call_st(subtensor, network, lambda st: st.metagraph(netuid), timeout_s=10)
-    block_hash, subtensor = await call_st(subtensor, network, lambda st: st.determine_block_hash(max_block), timeout_s=10)
-    commits = await get_commitments(
-        subtensor=subtensor,
-        metagraph=metagraph,
-        block_hash=block_hash,
-        netuid=netuid,
-        min_block=min_block,
-        max_block=max_block,
+def fetch_submission_miners(period: int) -> List[Miner]:
+    base_url = os.environ.get("SUBMISSION_API_URL", "").strip().rstrip("/")
+    api_key = os.environ.get("SUBMISSION_API_KEY", "").strip()
+    if not base_url:
+        raise RuntimeError("SUBMISSION_API_URL must be set")
+    if not api_key:
+        raise RuntimeError("SUBMISSION_API_KEY must be set")
+
+    url = f"{base_url}/submissions/by-epoch"
+    resp = requests.get(
+        url,
+        params={"epoch": int(period), "active_only": "true"},
+        headers={"X-API-Key": api_key},
+        timeout=20,
     )
-    out: List[Tuple[int, int, str, str]] = []
-    for c in commits.values():
-        out.append((int(c.uid), int(c.block), str(c.data), str(c.hotkey)))
-    return out
+    if resp.status_code >= 400:
+        raise RuntimeError(f"submission_api epoch fetch failed: status={resp.status_code} body={resp.text[:300]}")
+
+    body = resp.json()
+    items = body.get("items") if isinstance(body, dict) else None
+    if not isinstance(items, list):
+        raise RuntimeError("submission_api response missing items list")
+
+    miners: List[Miner] = []
+    for item in items:
+        uid = int(item["uid"])
+        hotkey = str(item["hotkey"])
+        coldkey = item["coldkey"]
+        submitted_at_utc = int(item["submitted_at_utc"])
+        submission_name = item["submission_name"]
+        miners.append(
+            Miner(
+                uid=uid,
+                submitted_at_utc=submitted_at_utc,
+                hotkey=hotkey,
+                coldkey=str(coldkey) if coldkey is not None else None,
+                submission_name=str(submission_name) if submission_name is not None else None,
+            )
+        )
+    miners.sort(key=lambda m: m.uid)
+    return miners
 
 
-def to_miners(commitments: Iterable[Miner]) -> List[Miner]:
-    return list(commitments)
-
-
-def commitment_to_clone(raw: Optional[str]):
-    """
-    Convert commitment string 'owner/repo@branch' to (clone_url, branch).
-    Returns (None, None) if parsing fails.
-    """
-    if not isinstance(raw, str) or "/" not in raw or "@" not in raw:
-        return None, None
-    try:
-        owner, rest = raw.split("/", 1)
-        repo, branch = rest.split("@", 1)
-        return f"https://github.com/{owner}/{repo}.git", branch
-    except Exception:
-        return None, None
-
-
-def get_previous_winner(current_block: int) -> Optional[tuple[Miner, int]]:
+def get_previous_winner() -> Optional[tuple[Miner, int]]:
     """
     Read previous winner once and build a Miner with the original UID.
     Returns (Miner, snapshot_epoch) or None if no previous winner is recorded.
@@ -140,14 +121,18 @@ def get_previous_winner(current_block: int) -> Optional[tuple[Miner, int]]:
         with winner_json_path.open("r", encoding="utf-8") as f:
             last_win = json.load(f)
         uid_val = int(last_win["uid"])
-        raw = str(last_win["raw"])
-        hotkey_val = last_win["hotkey"]
+        hotkey_val = str(last_win.get("hotkey") or "")
+        coldkey_val = last_win.get("coldkey")
+        submitted_at_utc_val = int(last_win.get("submitted_at_utc", 0) or 0)
         snapshot_epoch_val = last_win["snapshot_epoch"]
         snapshot_epoch_int = int(snapshot_epoch_val)
-        prev_winner = parse_commitment(raw, uid=uid_val, block_number=current_block, hotkey=hotkey_val)
-        if prev_winner is None:
-            bt.logging.info("previous winner: malformed winner.json (commitment parse failed); skipping")
-            return None
+        prev_winner = Miner(
+            uid=uid_val,
+            submitted_at_utc=submitted_at_utc_val,
+            hotkey=hotkey_val,
+            coldkey=str(coldkey_val) if coldkey_val else None,
+            submission_name=last_win.get("submission_name"),
+        )
         return prev_winner, snapshot_epoch_int
     except Exception as e:
         bt.logging.error(f"previous winner: failed: {type(e).__name__}: {e}")
@@ -163,35 +148,8 @@ def inject_previous_winner(miners: List[Miner], prev: Optional[Miner]) -> tuple[
         return miners, None
     updated = [m for m in miners if int(m.uid) != int(prev.uid)]
     updated.append(prev)
-    bt.logging.info(f"previous winner: included {prev.owner}/{prev.repo}@{prev.branch} as UID={prev.uid}")
+    bt.logging.info(f"previous winner: included uid={prev.uid}")
     return updated, int(prev.uid)
-
-
-def upload_snapshots_for_epoch(miners: List[Miner], epoch: int) -> List[Miner]:
-    """
-    Upload code snapshots for all miners for a single epoch.
-    Returns the miners whose snapshot upload succeeded.
-    """
-    successful_miners: List[Miner] = []
-    for miner in miners:
-        try:
-            upload_miner_snapshot(
-                owner=miner.owner,
-                repo=miner.repo,
-                branch=miner.branch,
-                uid=int(miner.uid),
-                epoch=epoch,
-            )
-            bt.logging.info(
-                f"snapshot: uploaded {miner.owner}/{miner.repo}@{miner.branch} uid={miner.uid} epoch={epoch}"
-            )
-            successful_miners.append(miner)
-        except Exception as e:
-            bt.logging.warning(
-                f"snapshot: upload failed for uid={miner.uid} {miner.owner}/{miner.repo}@{miner.branch}: "
-                f"{type(e).__name__}: {e}"
-            )
-    return successful_miners
     
 def ensure_miner_exists(repo_dir: Path) -> Path:
     miner_path = repo_dir / "miner.py"
@@ -212,13 +170,10 @@ def write_run_artifacts(runs_root: Path, period: int, miner: Miner, result_obj: 
 
     combined = {
         "uid": miner.uid,
+        "submitted_at_utc": miner.submitted_at_utc,
         "coldkey": miner.coldkey,
         "hotkey": miner.hotkey,
-        "block_number": miner.block_number,
-        "owner": miner.owner,
-        "repo": miner.repo,
-        "branch": miner.branch,
-        "raw": miner.raw,
+        "submission_name": miner.submission_name,
         "result": result_obj,
     }
     try:
@@ -243,8 +198,7 @@ def run_job(
     result_obj: Optional[Dict] = None
 
     try:
-        safe_repo = f"{miner.owner}_{miner.repo}".replace("/", "_")
-        dest = work_root / f"{period}_{safe_repo}_{miner.uid}"
+        dest = work_root / f"{period}_uid_{miner.uid}"
 
         if int(miner.uid) < 0:
             try:
@@ -288,7 +242,7 @@ def run_job(
         workdir, outdir = runner.prepare_workdir(miner_dir, challenge_params, dest_dir=dest)
         is_current_winner = snapshot_epoch is not None
         start_prefix = "run started for current winner" if is_current_winner else "run started for"
-        start_msg = f"{start_prefix} uid={miner.uid} repo={miner.owner}/{miner.repo}@{miner.branch}"
+        start_msg = f"{start_prefix} uid={miner.uid}"
         bt.logging.info(start_msg)
         code, output = runner.run_container(workdir, outdir, period=period, uid=int(miner.uid))
         bt.logging.info(f"run finished uid={miner.uid} exit={code}")
@@ -330,17 +284,6 @@ def run_job(
     write_run_artifacts(runs_root, period, miner, result_obj)
 
 
-def gather_parse_and_schedule(commit_quads: Iterable[Tuple[int, int, str, str]]) -> List[Miner]:
-    parsed: List[Miner] = []
-    for uid, block_number, raw, hotkey in commit_quads:
-        c = parse_commitment(raw, uid, block_number, hotkey)
-        if c is not None:
-            parsed.append(c)
-    miners = to_miners(parsed)
-    miners.sort(key=lambda m: (m.block_number, m.uid))
-    return miners
-
-
 async def main() -> int:
     runs_root = Path("/data/results").resolve()
     work_root = Path("/data/miner_runs").resolve()
@@ -349,11 +292,7 @@ async def main() -> int:
 
     load_dotenv(PROJECT_ROOT / ".env")
 
-    minio_access = os.environ.get("MINIO_ACCESS_KEY", "") or ""
-    is_evaluator = minio_access.endswith("-ro")
-
     network = os.environ.get("SUBTENSOR_NETWORK")
-    netuid = int(os.environ.get("NETUID", "68"))
 
     subtensor = bt.async_subtensor(network=network)
     await subtensor.initialize()
@@ -366,26 +305,13 @@ async def main() -> int:
     period_start_ts = period_index * interval_seconds
     period = period_index
 
-    approx_block_time_s = 12
-    blocks_window = max(1, interval_seconds // approx_block_time_s)
-    min_block = max(0, current_block - blocks_window)
-    max_block = current_block
     bt.logging.info(
         f"period_index={period} start_utc={dt.datetime.fromtimestamp(period_start_ts, dt.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}Z "
-        f"interval_seconds={interval_seconds} window_blocks≈{blocks_window} "
-        f"min_block={min_block} max_block={max_block}"
+        f"interval_seconds={interval_seconds}"
     )
 
-    submissions = await fetch_commitments_from_chain(network=network, netuid=netuid, min_block=min_block, max_block=max_block)
-    miners = gather_parse_and_schedule(submissions)
-    bt.logging.info(f"current_block={current_block} submissions={len(submissions)} miners={len(miners)}")
-
-    if is_evaluator:
-        wait_secs = 60
-        bt.logging.info(f"Evaluator mode; waiting {wait_secs}s for code uploads to complete")
-        time.sleep(wait_secs)
-    else:
-        miners = upload_snapshots_for_epoch(miners, period)
+    miners = fetch_submission_miners(period=period)
+    bt.logging.info(f"current_block={current_block} submission_api_miners={len(miners)} period={period}")
 
     block_hash, subtensor = await call_st(subtensor, network, lambda st: st.determine_block_hash(current_block), timeout_s=10)
     challenge_params = build_challenge_params(str(block_hash))
@@ -401,19 +327,12 @@ async def main() -> int:
         bt.logging.warning(f"failed to persist period input: {type(e).__name__}: {e}")
 
     try:
-        m = COMMITMENT_REGEX.match(BENCHMARK_GITHUB)
-        if not m:
-            raise ValueError(f"Invalid BENCHMARK_GITHUB: {BENCHMARK_GITHUB}")
         benchmark = Miner(
             uid=BENCHMARK_UID_RANDOM,
-            block_number=current_block,
-            raw=BENCHMARK_GITHUB,
-            owner=m.group("owner"),
-            repo=m.group("repo"),
-            branch=m.group("branch"),
+            submitted_at_utc=now_ts,
             hotkey="benchmark",
         )
-        bt.logging.info(f"benchmark: running {BENCHMARK_GITHUB} (uid=-1)")
+        bt.logging.info(f"benchmark: running brute_force snapshot (uid={BENCHMARK_UID_RANDOM})")
         run_job(benchmark, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
     except Exception as e:
         bt.logging.error(f"benchmark run failed: {type(e).__name__}: {e}")
@@ -421,11 +340,7 @@ async def main() -> int:
     try:
         ts_benchmark = Miner(
             uid=BENCHMARK_UID_THOMPSON,
-            block_number=current_block,
-            raw="benchmark/thompson_sampling@minio",
-            owner="benchmark",
-            repo="thompson_sampling",
-            branch="minio",
+            submitted_at_utc=now_ts,
             hotkey="benchmark",
         )
         bt.logging.info(f"thompson_sampling: running snapshot (uid={BENCHMARK_UID_THOMPSON})")
@@ -433,7 +348,7 @@ async def main() -> int:
     except Exception as e:
         bt.logging.error(f"thompson_sampling run failed: {type(e).__name__}: {e}")
 
-    prev_winner_data = get_previous_winner(current_block)
+    prev_winner_data = get_previous_winner()
     if prev_winner_data is not None:
         prev_winner, prev_snapshot_epoch = prev_winner_data
         miners, prev_winner_uid = inject_previous_winner(miners, prev_winner)
@@ -443,15 +358,6 @@ async def main() -> int:
 
     bench_scores_path = Path("/data/results") / f"period_{period}_benchmark_all_scores_0.json"
 
-    try:
-        metagraph, subtensor = await call_st(subtensor, network, lambda st: st.metagraph(netuid), timeout_s=10)
-        coldkeys = getattr(metagraph, 'coldkeys', None)
-        if coldkeys is not None:
-            for miner in miners:
-                if isinstance(miner.uid, int) and 0 <= miner.uid < len(coldkeys):
-                    miner.coldkey = coldkeys[miner.uid]
-    except Exception as e:
-        bt.logging.error(f"failed to populate coldkeys: {type(e).__name__}: {e}")
     total_miners = len(miners)
     for idx, miner in enumerate(miners, start=1):
         bt.logging.info(f"running miner {idx}/{total_miners} uid={miner.uid}")
@@ -485,9 +391,11 @@ async def main() -> int:
                     molecules = rec.get("result", {}).get("molecules", [])
                     uid_to_data[uid] = {
                         "molecules": molecules,
-                        "github_data": rec.get("raw"),
+                        "github_data": None,
                         "hotkey": rec.get("hotkey"),
                         "coldkey": rec.get("coldkey"),
+                        "submission_name": rec.get("submission_name"),
+                        "submitted_at_utc": int(rec.get("submitted_at_utc", 0) or 0),
                     }
         cfg = dict(challenge_params.get("config", {}))
         cfg.update(challenge_params.get("challenge", {}))
@@ -509,9 +417,6 @@ async def main() -> int:
             if isinstance(winner_uid, int):
                 win = uid_to_data.get(winner_uid, {})
 
-                raw_commitment = win.get("github_data")
-                github_url, github_branch = commitment_to_clone(raw_commitment)
-
                 # Determine snapshot_epoch: keep existing for same uid, else set to current period
                 snapshot_epoch: Optional[int] = None
                 winner_json_path = Path("/data/results/winner.json")
@@ -528,13 +433,14 @@ async def main() -> int:
                 if snapshot_epoch is None:
                     snapshot_epoch = period
 
+                winner_code_link = f"{int(snapshot_epoch)}/{int(winner_uid)}"
                 winner_obj = {
                     "uid": winner_uid,
                     "hotkey": win.get("hotkey"),
                     "coldkey": win.get("coldkey"),
-                    "raw": raw_commitment,
-                    "github": github_url,
-                    "branch": github_branch,
+                    "submission_name": win.get("submission_name"),
+                    "submitted_at_utc": int(win.get("submitted_at_utc", 0) or 0),
+                    "code_link": winner_code_link,
                     "score": winner_score,
                     "snapshot_epoch": snapshot_epoch,
                     "updated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),

@@ -5,8 +5,6 @@ from pathlib import Path
 import bittensor as bt
 from dotenv import load_dotenv
 
-from neurons.validator.code_archive import _resolve_snapshot_key
-
 load_dotenv()
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -66,7 +64,7 @@ async def submit_epoch_results(
         # Convert integer keys to strings for JSON
         score_dict_str = {str(k): v for k, v in score_dict.items()}
 
-        # Enrich uid_to_data with code_link using the snapshot key.
+        # Enrich uid_to_data with deterministic code_link.
         prev_winner_uid = config.get("prev_winner_uid")
         prev_winner_snapshot_epoch = _get_prev_winner_snapshot_epoch(prev_winner_uid)
 
@@ -82,13 +80,10 @@ async def submit_epoch_results(
                 ):
                     epoch_for_uid = prev_winner_snapshot_epoch
 
-                key = _resolve_snapshot_key(epoch=epoch_for_uid, uid=int(uid))
-                if key:
-                    if key.endswith(".tar.gz"):
-                        key = key[: -len(".tar.gz")]
-                    d["code_link"] = key
+                d["code_link"] = f"{int(epoch_for_uid)}/{int(uid)}"
             except Exception as e:
                 bt.logging.warning(f"Failed to resolve snapshot key for uid={uid}: {e}")
+            d["submission_name"] = d.get("submission_name")
             uid_to_data_enriched[uid] = d
 
         uid_to_data_str = {str(k): v for k, v in uid_to_data_enriched.items()}
