@@ -10,5 +10,6 @@ __pycache__
 
 .cache/
 debug/
+artifacts/
 miner_runs_old/
 scripts/

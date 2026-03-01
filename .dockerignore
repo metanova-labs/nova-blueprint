@@ -6,6 +6,7 @@ results/
 data/miner_runs/
 data/results/
 debug/
+artifacts/
 *.log
 __pycache__
 
