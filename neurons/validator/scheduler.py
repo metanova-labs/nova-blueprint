@@ -63,8 +63,8 @@ def _weights_loop(stop_event: threading.Event, cfg) -> None:
             if now >= next_ts:
                 winner = _read_json(winner_path)
                 target_uid = 0
-                if winner and isinstance(winner.get("uid"), int):
-                    target_uid = int(winner["uid"]) 
+                if winner and isinstance(winner.get("emission_target_uid"), int):
+                    target_uid = int(winner["emission_target_uid"])
                 bt.logging.info(f"weights: applying target_uid={target_uid}")
                 try:
                     apply_weights(target_uid)

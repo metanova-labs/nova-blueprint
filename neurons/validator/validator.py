@@ -120,18 +120,19 @@ def get_previous_winner() -> Optional[tuple[Miner, int]]:
             return None
         with winner_json_path.open("r", encoding="utf-8") as f:
             last_win = json.load(f)
-        uid_val = int(last_win["uid"])
-        hotkey_val = str(last_win.get("hotkey") or "")
-        coldkey_val = last_win.get("coldkey")
-        submitted_at_utc_val = int(last_win.get("submitted_at_utc", 0) or 0)
-        snapshot_epoch_val = last_win["snapshot_epoch"]
+        winner_snapshot = last_win["winner_snapshot"]
+        uid_val = int(winner_snapshot["uid"])
+        hotkey_val = str(winner_snapshot.get("hotkey") or "")
+        coldkey_val = winner_snapshot.get("coldkey")
+        submitted_at_utc_val = int(winner_snapshot.get("submitted_at_utc", 0) or 0)
+        snapshot_epoch_val = winner_snapshot["snapshot_epoch"]
         snapshot_epoch_int = int(snapshot_epoch_val)
         prev_winner = Miner(
             uid=uid_val,
             submitted_at_utc=submitted_at_utc_val,
             hotkey=hotkey_val,
             coldkey=str(coldkey_val) if coldkey_val else None,
-            submission_name=last_win.get("submission_name"),
+            submission_name=winner_snapshot.get("submission_name"),
         )
         return prev_winner, snapshot_epoch_int
     except Exception as e:
@@ -412,47 +413,50 @@ async def main() -> int:
             uid_to_data,
             str(bench_scores_path),
         )
-        # Persist winner: overwrite each run
+        # Persist winner only when winner UID changes.
         try:
             if isinstance(winner_uid, int):
                 win = uid_to_data.get(winner_uid, {})
-
-                # Determine snapshot_epoch: keep existing for same uid, else set to current period
-                snapshot_epoch: Optional[int] = None
                 winner_json_path = Path("/data/results/winner.json")
+                prev_winner_uid: Optional[int] = None
                 if winner_json_path.exists():
                     try:
                         with winner_json_path.open("r", encoding="utf-8") as f:
                             prev = json.load(f)
-                        prev_uid = int(prev.get("uid", -1))
-                        prev_snapshot_epoch_val = prev.get("snapshot_epoch")
-                        if prev_uid == winner_uid and prev_snapshot_epoch_val is not None:
-                            snapshot_epoch = int(prev_snapshot_epoch_val)
+                        prev_winner_uid = int(prev["winner_snapshot"]["uid"])
                     except Exception:
-                        snapshot_epoch = None
-                if snapshot_epoch is None:
-                    snapshot_epoch = period
+                        prev_winner_uid = None
 
-                winner_code_link = f"{int(snapshot_epoch)}/{int(winner_uid)}"
-                winner_obj = {
-                    "uid": winner_uid,
-                    "hotkey": win.get("hotkey"),
-                    "coldkey": win.get("coldkey"),
-                    "submission_name": win.get("submission_name"),
-                    "submitted_at_utc": int(win.get("submitted_at_utc", 0) or 0),
-                    "code_link": winner_code_link,
-                    "score": winner_score,
-                    "snapshot_epoch": snapshot_epoch,
-                    "updated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-                }
-                out_dir = Path("/data/results").resolve()
-                out_dir.mkdir(parents=True, exist_ok=True)
-                out_path = out_dir / "winner.json"
-                tmp_path = out_dir / "winner.json.tmp"
-                with tmp_path.open("w", encoding="utf-8") as f:
-                    json.dump(winner_obj, f, separators=(",", ":"))
-                os.replace(tmp_path, out_path)
-                bt.logging.info(f"winner persisted uid={winner_uid} at {out_path}")
+                if prev_winner_uid == winner_uid:
+                    bt.logging.info(
+                        f"winner unchanged uid={winner_uid}; keeping existing winner.json metadata unchanged"
+                    )
+                else:
+                    snapshot_epoch = period
+                    winner_code_link = f"{int(snapshot_epoch)}/{int(winner_uid)}"
+                    winner_obj = {
+                        "winner_snapshot": {
+                            "uid": winner_uid,
+                            "hotkey": win.get("hotkey"),
+                            "coldkey": win.get("coldkey"),
+                            "submission_name": win.get("submission_name"),
+                            "submitted_at_utc": int(win.get("submitted_at_utc", 0) or 0),
+                            "code_link": winner_code_link,
+                            "score": winner_score,
+                            "snapshot_epoch": snapshot_epoch,
+                            "updated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+                        },
+                        "emission_target_uid": winner_uid,
+                    }
+                    out_dir = Path("/data/results").resolve()
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    out_path = out_dir / "winner.json"
+                    tmp_path = out_dir / "winner.json.tmp"
+                    with tmp_path.open("w", encoding="utf-8") as f:
+                        json.dump(winner_obj, f, separators=(",", ":"))
+                    os.replace(tmp_path, out_path)
+                    bt.logging.info(f"winner persisted uid={winner_uid} at {out_path}")
+
         except Exception as e:
             bt.logging.error(f"failed to persist winner: {type(e).__name__}: {e}")
     except Exception as e:

@@ -23,8 +23,9 @@ def _get_prev_winner_snapshot_epoch(prev_winner_uid):
             return None
         with winner_json_path.open("r", encoding="utf-8") as f:
             prev = json.load(f)
-        prev_uid = int(prev["uid"])
-        prev_snapshot_epoch_val = prev.get("snapshot_epoch")
+        prev_snapshot = prev["winner_snapshot"]
+        prev_uid = int(prev_snapshot["uid"])
+        prev_snapshot_epoch_val = prev_snapshot.get("snapshot_epoch")
         if prev_uid == int(prev_winner_uid) and prev_snapshot_epoch_val is not None:
             return int(prev_snapshot_epoch_val)
     except Exception as e:
