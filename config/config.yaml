@@ -21,7 +21,7 @@ reaction_filtering:
   random_valid_reaction: true  # true = one random reaction per epoch, false = all reactions valid
 
 run:
-  time_budget_sec: 1800
+  time_budget_sec: 900
   # One competition every day (UTC-aligned)
   competition_interval_seconds: 86400
   # Initial minimum absolute improvement required to replace previous winner (e.g., 0.05 ~ 5%)
