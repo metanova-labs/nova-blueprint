@@ -5,6 +5,7 @@ venv
 results/
 data/miner_runs/
 data/results/
+debug/
 *.log
 __pycache__
 

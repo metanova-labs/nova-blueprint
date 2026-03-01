@@ -1,6 +1,7 @@
 name: nova-blueprint
 services:
   nova-blueprint:
+    build: .
     image: ${VALIDATOR_IMAGE:-urdof7/nova-blueprint:latest}
     container_name: nova-blueprint
     restart: "no"
