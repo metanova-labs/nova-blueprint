@@ -93,7 +93,26 @@ def download_and_extract_snapshot(
         except Exception:
             pass
 
-    return target_dir
+    repo_root = _resolve_repo_root(target_dir)
+    return repo_root
+
+
+def _resolve_repo_root(extracted_dir: Path) -> Path:
+    """
+    Find the directory containing miner.py.
+    Handles both: miner.py at root, or miner.py inside a single top-level subdir (submission API format).
+    """
+    extracted_dir = extracted_dir.resolve()
+    if (extracted_dir / "miner.py").is_file():
+        return extracted_dir
+    subdirs = [d for d in extracted_dir.iterdir() if d.is_dir()]
+    if len(subdirs) == 1 and (subdirs[0] / "miner.py").is_file():
+        return subdirs[0]
+    for d in subdirs:
+        if (d / "miner.py").is_file():
+            return d
+
+    return extracted_dir
 
 def download_benchmark_snapshot(
     work_root: Path,
