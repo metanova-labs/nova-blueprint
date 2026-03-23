@@ -10,6 +10,25 @@ load_dotenv()
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 
 
+def _normalize_allowed_reaction(value):
+    """Convert validator reaction identifiers like 'rxn:4' to integer 4."""
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        if value.startswith("rxn:"):
+            try:
+                return int(value.split(":")[-1])
+            except (TypeError, ValueError):
+                return None
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
 def _get_prev_winner_snapshot_epoch(prev_winner_uid):
     """
     Return the snapshot_epoch for the previous winner UID from winner.json,
@@ -89,6 +108,7 @@ async def submit_epoch_results(
 
         uid_to_data_str = {str(k): v for k, v in uid_to_data_enriched.items()}
         valid_molecules_str = {str(k): v for k, v in valid_molecules_by_uid.items()}
+        allowed_reaction = _normalize_allowed_reaction(config.get("allowed_reaction"))
 
         # Build POST payload
         payload = {
@@ -101,9 +121,10 @@ async def submit_epoch_results(
                 "max_rotatable_bonds": config.get("max_rotatable_bonds", 0),
                 "min_heavy_atoms": config.get("min_heavy_atoms", 0),
                 "num_molecules": config.get("num_molecules", 0),
-                "entropy_min_threshold": config.get("entropy_min_threshold", 0.0),
-                "time_budget_sec": config.get("time_budget_sec", 0),
+                "entropy_threshold": config.get("entropy_min_threshold", 0.0),
+                "time_budget": config.get("time_budget_sec", 0),
                 "threshold_to_win": config.get("threshold_to_win", 0),
+                "allowed_reaction": allowed_reaction,
             },
             "score_dict": score_dict_str,
             "uid_to_data": uid_to_data_str,
