@@ -7,7 +7,7 @@ molecule_validation:
   # Scoring weights for target/antitarget binding
   antitarget_weight: 0.9
   # Scoring weights for entropy
-  entropy_min_threshold: 0.1
+  entropy_min_threshold: 0.25
 
   # Molecular property requirements
   min_heavy_atoms: 20
