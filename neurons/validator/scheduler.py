@@ -50,6 +50,17 @@ def _read_json(path: Path) -> dict | None:
     except Exception:
         return None
 
+
+def _resolve_weight_target_uid(cfg: dict, winner: dict | None) -> int:
+    override_uid = cfg.get("emission_target_override_uid")
+    if override_uid is not None:
+        return int(override_uid)
+
+    if winner and isinstance(winner.get("emission_target_uid"), int):
+        return int(winner["emission_target_uid"])
+
+    return 0
+
 def _weights_loop(stop_event: threading.Event, cfg) -> None:
     try:
         interval_s = 3600  # 60 minutes
@@ -62,9 +73,7 @@ def _weights_loop(stop_event: threading.Event, cfg) -> None:
             now = time.time()
             if now >= next_ts:
                 winner = _read_json(winner_path)
-                target_uid = 0
-                if winner and isinstance(winner.get("emission_target_uid"), int):
-                    target_uid = int(winner["emission_target_uid"])
+                target_uid = _resolve_weight_target_uid(cfg, winner)
                 bt.logging.info(f"weights: applying target_uid={target_uid}")
                 try:
                     apply_weights(target_uid)
