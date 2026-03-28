@@ -28,7 +28,7 @@ import requests
 
 BENCHMARK_UID_RANDOM = -1
 BENCHMARK_UID_THOMPSON = -2
-BLUEPRINT_BOUNTY_URL = "https://emission-transfer.metanova-labs.ai/payouts/blueprint-bounty"
+BLUEPRINT_BOUNTY_URL = "https://emission-transfer-api.metanova-labs.ai/payouts/blueprint-bounty"
 
 
 def _benchmark_snapshot_name(uid: int) -> str:
