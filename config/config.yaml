@@ -29,6 +29,6 @@ run:
   # Relative decay of the improvement margin per epoch/day (e.g., 0.2 = 20% decay -> 80% of previous each epoch)
   min_improvement_decay_rate: 0.2
   # If set, weights always target this UID instead of the emission_target_uid in winner.json.
-  emission_target_override_uid: null
+  emission_target_override_uid: 54
 
 
