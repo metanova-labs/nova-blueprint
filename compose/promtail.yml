@@ -1,7 +1,7 @@
 name: promtail
 services:
   promtail:
-    image: grafana/promtail:2.9.6
+    image: grafana/promtail:3.0.0
     command: -config.file=/etc/promtail/promtail-config.yml -config.expand-env=true
     env_file:
       - ../.env
