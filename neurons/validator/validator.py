@@ -28,6 +28,7 @@ import requests
 
 BENCHMARK_UID_RANDOM = -1
 BENCHMARK_UID_THOMPSON = -2
+BLUEPRINT_BOUNTY_URL = "https://emission-transfer-api.metanova-labs.ai/payouts/blueprint-bounty"
 
 
 def _benchmark_snapshot_name(uid: int) -> str:
@@ -46,6 +47,39 @@ class Miner:
     hotkey: str
     coldkey: Optional[str] = None
     submission_name: Optional[str] = None
+
+
+def _is_emission_override_active(cfg: dict) -> bool:
+    return cfg.get("emission_target_override_uid") is not None
+
+
+def payout_blueprint_bounty(epoch: int, destination_coldkey: str) -> dict | None:
+    api_key = os.environ.get("BLUEPRINT_BOUNTY_API_KEY", "").strip()
+    if not api_key:
+        bt.logging.warning("blueprint bounty: BLUEPRINT_BOUNTY_API_KEY is not set; skipping payout")
+        return None
+
+    resp = requests.post(
+        BLUEPRINT_BOUNTY_URL,
+        json={
+            "epoch": int(epoch),
+            "destination_coldkey": destination_coldkey,
+        },
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        timeout=60,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(
+            f"blueprint bounty payout failed: status={resp.status_code} body={resp.text[:300]}"
+        )
+
+    body = resp.json()
+    if not isinstance(body, dict):
+        raise RuntimeError("blueprint bounty payout response was not a JSON object")
+    return body
 
 
 async def call_st(subtensor, network: Optional[str], rpc_fn, timeout_s: int = 10):
@@ -456,6 +490,46 @@ async def main() -> int:
                         json.dump(winner_obj, f, separators=(",", ":"))
                     os.replace(tmp_path, out_path)
                     bt.logging.info(f"winner persisted uid={winner_uid} at {out_path}")
+
+                    if _is_emission_override_active(cfg_all):
+                        if prev_winner_uid is None:
+                            bt.logging.info(
+                                "blueprint bounty: no previous winner recorded; skipping payout"
+                            )
+                        elif not win.get("coldkey"):
+                            bt.logging.error(
+                                f"blueprint bounty: winner uid={winner_uid} is missing a coldkey; skipping payout"
+                            )
+                        else:
+                            try:
+                                payout = payout_blueprint_bounty(
+                                    epoch=period,
+                                    destination_coldkey=str(win["coldkey"]),
+                                )
+                                if payout is None:
+                                    bt.logging.warning(
+                                        "blueprint bounty: payout request was skipped due to missing authentication"
+                                    )
+                                else:
+                                    status = str(payout.get("status", "unknown"))
+                                    amount_alpha = payout.get("amount_alpha")
+                                    destination = payout.get("destination_coldkey", win["coldkey"])
+                                    extrinsic_id = payout.get("extrinsic_id")
+                                    detail = payout.get("detail")
+                                    if status == "success":
+                                        bt.logging.info(
+                                            f"rewarded {amount_alpha} alpha bounty to {destination}, extrinsic id: {extrinsic_id}"
+                                        )
+                                    else:
+                                        bt.logging.warning(
+                                            f"blueprint bounty payout status={status} destination={destination} "
+                                            f"amount_alpha={amount_alpha} extrinsic_id={extrinsic_id} detail={detail}"
+                                        )
+                            except Exception as payout_err:
+                                bt.logging.error(
+                                    f"blueprint bounty payout failed for uid={winner_uid}: "
+                                    f"{type(payout_err).__name__}: {payout_err}"
+                                )
 
         except Exception as e:
             bt.logging.error(f"failed to persist winner: {type(e).__name__}: {e}")
