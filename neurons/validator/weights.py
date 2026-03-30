@@ -8,7 +8,11 @@ MECH_ID = 1
 BURN_RATE = 0
 
 
-def apply_weights(target_uid: int) -> None:
+def apply_weights(
+    winner_uid: int,
+    override_uid: int | None = None,
+    override_share: float = 1.0,
+) -> None:
     load_dotenv()
 
     wallet_name = os.getenv("BT_WALLET_COLD")
@@ -40,24 +44,39 @@ def apply_weights(target_uid: int) -> None:
         if n == 0:
             bt.logging.error("weights: empty metagraph")
             return
-        if not (0 <= target_uid < n):
-            bt.logging.error(f"weights: target_uid {target_uid} out of range [0, {n-1}]")
+        if not (0 <= winner_uid < n):
+            bt.logging.error(f"weights: winner_uid {winner_uid} out of range [0, {n-1}]")
+            return
+        if override_uid is not None and not (0 <= override_uid < n):
+            bt.logging.error(f"weights: override_uid {override_uid} out of range [0, {n-1}]")
             return
 
         weights = [0.0] * n
         remainder = max(0.0, 1.0 - BURN_RATE)
-        if target_uid == 0:
-            weights[0] = BURN_RATE + remainder
+
+        if override_uid is None:
+            if winner_uid == 0:
+                weights[0] = BURN_RATE + remainder
+            else:
+                weights[0] = BURN_RATE
+                weights[winner_uid] = remainder
         else:
             weights[0] = BURN_RATE
-            weights[target_uid] = remainder
+            override_share = min(max(float(override_share), 0.0), 1.0)
+            if override_uid == winner_uid:
+                weights[winner_uid] = remainder
+            else:
+                winner_share = 1.0 - override_share
+                weights[override_uid] += remainder * override_share
+                weights[winner_uid] += remainder * winner_share
 
         max_retries = 2
         delay_s = 60
         for attempt in range(1, max_retries + 1):
             try:
                 bt.logging.info(
-                    f"weights: attempt {attempt} apply uid={target_uid} burn={BURN_RATE}"
+                    f"weights: attempt {attempt} apply winner_uid={winner_uid} "
+                    f"override_uid={override_uid} override_share={override_share:.4f} burn={BURN_RATE}"
                 )
                 success, message = subtensor.set_weights(
                     wallet=wallet,
