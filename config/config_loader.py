@@ -38,6 +38,7 @@ def load_config(path: str = os.path.join(BASE_DIR, "config/config.yaml")):
     emission_target_override_uid = run_cfg.get("emission_target_override_uid")
     if emission_target_override_uid is not None:
         emission_target_override_uid = int(emission_target_override_uid)
+    emission_target_override_share = float(run_cfg.get("emission_target_override_share", 1.0))
 
     return {
         'num_antitargets': num_antitargets,
@@ -53,6 +54,7 @@ def load_config(path: str = os.path.join(BASE_DIR, "config/config.yaml")):
         'min_improvement_margin': min_improvement_margin,
         'min_improvement_decay_rate': min_improvement_decay_rate,
         'emission_target_override_uid': emission_target_override_uid,
+        'emission_target_override_share': emission_target_override_share,
     }
 
 

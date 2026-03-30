@@ -51,15 +51,17 @@ def _read_json(path: Path) -> dict | None:
         return None
 
 
-def _resolve_weight_target_uid(cfg: dict, winner: dict | None) -> int:
-    override_uid = cfg.get("emission_target_override_uid")
-    if override_uid is not None:
-        return int(override_uid)
-
+def _resolve_weight_targets(cfg: dict, winner: dict | None) -> tuple[int, int | None, float]:
+    winner_uid = 0
     if winner and isinstance(winner.get("emission_target_uid"), int):
-        return int(winner["emission_target_uid"])
+        winner_uid = int(winner["emission_target_uid"])
 
-    return 0
+    override_uid = cfg.get("emission_target_override_uid")
+    override_share = float(cfg.get("emission_target_override_share", 1.0))
+    if override_uid is not None:
+        return winner_uid, int(override_uid), override_share
+
+    return winner_uid, None, 1.0
 
 def _weights_loop(stop_event: threading.Event, cfg) -> None:
     try:
@@ -73,10 +75,17 @@ def _weights_loop(stop_event: threading.Event, cfg) -> None:
             now = time.time()
             if now >= next_ts:
                 winner = _read_json(winner_path)
-                target_uid = _resolve_weight_target_uid(cfg, winner)
-                bt.logging.info(f"weights: applying target_uid={target_uid}")
+                winner_uid, override_uid, override_share = _resolve_weight_targets(cfg, winner)
+                bt.logging.info(
+                    f"weights: applying winner_uid={winner_uid} "
+                    f"override_uid={override_uid} override_share={override_share}"
+                )
                 try:
-                    apply_weights(target_uid)
+                    apply_weights(
+                        winner_uid=winner_uid,
+                        override_uid=override_uid,
+                        override_share=override_share,
+                    )
                 except Exception as e:
                     bt.logging.error(f"weights: failed to set: {type(e).__name__}: {e}")
                 # schedule next run
