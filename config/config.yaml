@@ -25,9 +25,9 @@ run:
   # One competition every day (UTC-aligned)
   competition_interval_seconds: 86400
   # Initial minimum absolute improvement required to replace previous winner (e.g., 0.05 ~ 5%)
-  min_improvement_margin: 0.05
+  min_improvement_margin: 0.03
   # Relative decay of the improvement margin per epoch/day (e.g., 0.2 = 20% decay -> 80% of previous each epoch)
-  min_improvement_decay_rate: 0.2
+  min_improvement_decay_rate: 0.0285
   # If set, this UID receives the configured override share of weights.
   emission_target_override_uid: 54
   # Fraction of non-burn weights to route to the override UID

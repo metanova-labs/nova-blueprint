@@ -16,7 +16,7 @@ def compute_effective_min_improvement_margin(
     decay_rate: float,
 ) -> float:
     """Exponential decay of the improvement margin over `age_epochs` with a floor."""
-    MIN_MARGIN = 0.01
+    MIN_MARGIN = 0.02
     if decay_rate <= 0.0 or age_epochs <= 0:
         return max(MIN_MARGIN, base_margin)
     return max(MIN_MARGIN, base_margin * (1.0 - decay_rate) ** age_epochs)
