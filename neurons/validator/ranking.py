@@ -155,7 +155,7 @@ def determine_winner(
         if 'ps_final_score' not in data:
             continue
         
-        score = round(data['ps_final_score'], 4)
+        score = round(data['ps_final_score'], 6)
         
         if score > best_score:
             best_score = score
