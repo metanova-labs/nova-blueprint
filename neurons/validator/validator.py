@@ -69,7 +69,7 @@ def payout_blueprint_bounty(epoch: int, destination_coldkey: str) -> dict | None
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
-        timeout=60,
+        timeout=(5, 70),
     )
     if resp.status_code >= 400:
         raise RuntimeError(
