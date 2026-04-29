@@ -325,6 +325,20 @@ def generate_molecules_from_pools(rxn_id: int, n: int, molecules_A: List[Tuple],
     return mol_ids
 
 
+def _parse_allowed_reaction(allowed_reaction) -> Optional[int]:
+    if allowed_reaction is None:
+        return None
+    if isinstance(allowed_reaction, int):
+        return allowed_reaction
+
+    value = str(allowed_reaction).strip()
+    if not value:
+        return None
+    if value.startswith("rxn:"):
+        value = value.split(":")[-1]
+    return int(value)
+
+
 def run_sampler(n_samples: int = 1000, 
                 seed: int = None, 
                 subnet_config: dict = None, 
@@ -336,15 +350,37 @@ def run_sampler(n_samples: int = 1000,
         bt.logging.error("No reactions found in the database, check db path and integrity.")
         return
 
-    rxn_ids = [reactions[i][0] for i in range(len(reactions))]
+    rxn_ids = [int(reaction[0]) for reaction in reactions]
+    allowed_rxn_id = _parse_allowed_reaction((subnet_config or {}).get("allowed_reaction"))
 
-    rxn_id = int(subnet_config["allowed_reaction"].split(":")[-1])
-    bt.logging.info(f"Generating {n_samples} random molecules for reaction {rxn_id}")
+    if allowed_rxn_id is not None:
+        if allowed_rxn_id not in rxn_ids:
+            bt.logging.error(f"Allowed reaction {allowed_rxn_id} not found in the database.")
+            return {"molecules": []}
 
-    # Generate molecules with validation in batches for efficiency
-    sampler_data = generate_valid_random_molecules_batch(
-        rxn_id, n_samples, db_path, subnet_config, batch_size=200, seed=seed
+        bt.logging.info(f"Generating {n_samples} random molecules for reaction {allowed_rxn_id}")
+        sampler_data = generate_valid_random_molecules_batch(
+            allowed_rxn_id, n_samples, db_path, subnet_config, batch_size=200, seed=seed
         )
+    else:
+        bt.logging.info(f"Generating {n_samples} random molecules across all {len(rxn_ids)} reactions")
+        molecules = []
+        base_count = n_samples // len(rxn_ids)
+        remainder = n_samples % len(rxn_ids)
+
+        for idx, rxn_id in enumerate(rxn_ids):
+            reaction_count = base_count + (1 if idx < remainder else 0)
+            if reaction_count <= 0:
+                continue
+
+            reaction_seed = None if seed is None else seed + idx
+            reaction_data = generate_valid_random_molecules_batch(
+                rxn_id, reaction_count, db_path, subnet_config, batch_size=200, seed=reaction_seed
+            )
+            molecules.extend(reaction_data.get("molecules", []))
+
+        random.Random(seed).shuffle(molecules)
+        sampler_data = {"molecules": molecules[:n_samples]}
 
     if save_to_file:
         with open(output_path, "w") as f:
