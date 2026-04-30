@@ -54,7 +54,7 @@ def validate_molecules_and_calculate_entropy(
         for molecule in data["molecules"]:
             try:
                 # Check if reaction is allowed this epoch (if filtering enabled)
-                if config.get('random_valid_reaction') and not is_reaction_allowed(molecule, allowed_reaction):
+                if allowed_reaction is not None and not is_reaction_allowed(molecule, allowed_reaction):
                     bt.logging.warning(
                         f"UID={uid}, molecule='{molecule}' uses disallowed reaction for this epoch (only {allowed_reaction} allowed)"
                     )
