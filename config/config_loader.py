@@ -23,6 +23,7 @@ def load_config(path: str = os.path.join(BASE_DIR, "config/config.yaml")):
     max_rotatable_bonds = validation_config["max_rotatable_bonds"]
     num_molecules = validation_config["num_molecules"]
     entropy_min_threshold = validation_config["entropy_min_threshold"]
+    tanimoto_max_threshold = float(validation_config.get("tanimoto_max_threshold", 1.0))
 
     # Load reaction filtering configuration
     reaction_config = config["reaction_filtering"]
@@ -48,6 +49,7 @@ def load_config(path: str = os.path.join(BASE_DIR, "config/config.yaml")):
         'max_rotatable_bonds': max_rotatable_bonds,
         'num_molecules': num_molecules,
         'entropy_min_threshold': entropy_min_threshold,
+        'tanimoto_max_threshold': tanimoto_max_threshold,
         'random_valid_reaction': random_valid_reaction,
         'time_budget_sec': time_budget_sec,
         'competition_interval_seconds': competition_interval_seconds,

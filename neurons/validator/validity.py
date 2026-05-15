@@ -6,7 +6,8 @@ from utils.molecules import (
     get_smiles,
     get_heavy_atom_count,
     compute_maccs_entropy,
-    find_chemically_identical
+    find_chemically_identical,
+    find_too_similar_pairs,
 )
 from utils.reactions import is_reaction_allowed
 
@@ -122,6 +123,25 @@ def validate_molecules_and_calculate_entropy(
                     continue 
             except Exception as e:
                 bt.logging.warning(f"Error checking for chemically identical molecules for UID={uid}: {e}")
+
+        # Pairwise diversity check: reject if any two molecules are too similar.
+        if valid_smiles:
+            tanimoto_max_threshold = config.get("tanimoto_max_threshold", 1.0)
+            try:
+                too_similar = find_too_similar_pairs(valid_smiles, tanimoto_max_threshold)
+                if too_similar:
+                    examples = "; ".join(
+                        f"{valid_names[i]}~{valid_names[j]} (Tanimoto={s:.3f})"
+                        for i, j, s in too_similar[:3]
+                    )
+                    bt.logging.warning(
+                        f"UID={uid} submission rejected: {len(too_similar)} molecule pair(s) "
+                        f"exceed Tanimoto threshold {tanimoto_max_threshold}. Examples: {examples}"
+                    )
+                    score_dict[uid]["entropy"] = None
+                    continue
+            except Exception as e:
+                bt.logging.warning(f"Error running pairwise diversity check for UID={uid}: {e}")
 
         
         # Calculate entropy if we have valid molecules, or skip if below threshold

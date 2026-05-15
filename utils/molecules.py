@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import MACCSkeys
+from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
+from rdkit.DataStructs import BulkTanimotoSimilarity
 from huggingface_hub import hf_hub_download, hf_hub_url, get_hf_file_metadata
 from huggingface_hub.errors import EntryNotFoundError
 import bittensor as bt
@@ -129,3 +131,41 @@ def find_chemically_identical(smiles_list: list[str]) -> dict:
     duplicates = {k: v for k, v in inchikey_to_indices.items() if len(v) > 1}
     
     return duplicates
+
+
+def find_too_similar_pairs(
+    smiles_list: list[str],
+    threshold: float,
+    radius: int = 2,
+    n_bits: int = 2048,
+) -> list[tuple[int, int, float]]:
+    """
+    Return all (i, j, similarity) pairs whose Morgan/ECFP4 Tanimoto similarity
+    is >= ``threshold``. Pairs are reported with i < j.
+
+    A submission is considered diverse iff this returns an empty list. Returning
+    pairs (rather than a bool) lets callers log which molecules collided.
+
+    Set ``threshold`` to 1.0 to effectively disable the check (only exact-FP
+    duplicates would trigger, and those are already caught by the InChIKey check).
+    """
+    if threshold >= 1.0 + 1e-12 or len(smiles_list) < 2:
+        return []
+
+    generator = GetMorganGenerator(radius=radius, fpSize=n_bits)
+    fps = []
+    indices = []
+    for i, smi in enumerate(smiles_list):
+        mol = Chem.MolFromSmiles(smi)
+        if mol is None:
+            continue
+        fps.append(generator.GetFingerprint(mol))
+        indices.append(i)
+
+    offending: list[tuple[int, int, float]] = []
+    for k in range(len(fps) - 1):
+        sims = BulkTanimotoSimilarity(fps[k], fps[k + 1:])
+        for off, s in enumerate(sims):
+            if s >= threshold:
+                offending.append((indices[k], indices[k + 1 + off], float(s)))
+    return offending
