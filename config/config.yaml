@@ -11,7 +11,7 @@ molecule_validation:
   # Pairwise-diversity rule: reject the entire submission if any two molecules
   # have Morgan (ECFP4, 2048-bit) Tanimoto similarity >= this threshold.
   # 1.0 effectively disables the rule; lower values enforce more diversity.
-  tanimoto_max_threshold: 1.0
+  tanimoto_max_threshold: 0.9
 
   # Molecular property requirements
   min_heavy_atoms: 20
