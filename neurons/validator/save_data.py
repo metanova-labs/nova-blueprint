@@ -1,9 +1,11 @@
+import math
 import os
 import json
-from pathlib import Path
 
 import bittensor as bt
 from dotenv import load_dotenv
+
+from neurons.validator.contest import entry_id
 
 load_dotenv()
 
@@ -29,27 +31,37 @@ def _normalize_allowed_reaction(value):
     return None
 
 
-def _get_prev_winner_snapshot_epoch(prev_winner_uid):
-    """
-    Return the snapshot_epoch for the previous winner UID from winner.json,
-    or None if not available/mismatched.
-    """
-    if prev_winner_uid is None:
-        return None
+def _json_float(value):
+    """Coerce to a JSON-safe float, mapping non-finite values to None."""
     try:
-        winner_json_path = Path("/data/results/winner.json")
-        if not winner_json_path.exists():
-            return None
-        with winner_json_path.open("r", encoding="utf-8") as f:
-            prev = json.load(f)
-        prev_snapshot = prev["winner_snapshot"]
-        prev_uid = int(prev_snapshot["uid"])
-        prev_snapshot_epoch_val = prev_snapshot.get("snapshot_epoch")
-        if prev_uid == int(prev_winner_uid) and prev_snapshot_epoch_val is not None:
-            return int(prev_snapshot_epoch_val)
-    except Exception as e:
-        bt.logging.warning(f"Failed to read previous winner snapshot_epoch: {e}")
-    return None
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isinf(out) or math.isnan(out):
+        return None
+    return out
+
+
+def _build_entry_molecules(valid_entry: dict | None, scores: dict) -> list[dict]:
+    """Pre-zip per-molecule scores into the backend's Molecule shape."""
+    names = (valid_entry or {}).get("names", []) or []
+    smiles = (valid_entry or {}).get("smiles", []) or []
+    targets = scores.get("ps_target_scores", []) or []
+    antitargets = scores.get("ps_antitarget_scores", []) or []
+    combined = scores.get("ps_combined_molecule_scores", []) or []
+
+    molecules = []
+    for j in range(min(len(names), len(smiles))):
+        molecules.append(
+            {
+                "name": str(names[j]),
+                "smiles": str(smiles[j]),
+                "ps_target_scores": [_json_float(col[j]) for col in targets if j < len(col)],
+                "ps_antitarget_scores": [_json_float(col[j]) for col in antitargets if j < len(col)],
+                "ps_final_score": _json_float(combined[j]) if j < len(combined) else None,
+            }
+        )
+    return molecules
 
 
 async def submit_epoch_results(
@@ -57,20 +69,21 @@ async def submit_epoch_results(
     epoch_number: int,
     target_proteins: list[str],
     antitarget_proteins: list[str],
-    uid_to_data: dict,
-    valid_molecules_by_uid: dict,
+    entries: dict,
+    valid_molecules_by_entry: dict,
     score_dict: dict,
+    state: dict,
     scored_sample_path: str = os.path.join(BASE_DIR, "all_scores_0.json"),
-    winner_uid=None,
     benchmarks: list[dict] | None = None,
 ) -> bool:
     """
-    Submit epoch results to backend API via POST request.
+    Submit one epoch of results to the backend as a single self-contained
+    entries[] payload (each entry carries its identity, role, score and
+    pre-zipped molecules). Best-effort; never raises into the caller.
     """
     try:
         from utils.BackendAPI import BackendAPI
 
-        # load entire scored sample JSON file for backend
         scored_sample_data = None
         if os.path.exists(scored_sample_path):
             try:
@@ -81,36 +94,45 @@ async def submit_epoch_results(
                     f"Failed to load scored sample data from {scored_sample_path}: {e}"
                 )
 
-        # Convert integer keys to strings for JSON
-        score_dict_str = {str(k): v for k, v in score_dict.items()}
+        # Post-transition roles drive each entry's kind/wins.
+        champion = (state or {}).get("champion")
+        champion_eid = entry_id(champion["hotkey"], champion["snapshot_epoch"]) if champion else None
+        challenger_wins = {
+            entry_id(c["hotkey"], c["snapshot_epoch"]): int(c.get("wins", 0))
+            for c in (state or {}).get("challengers", [])
+        }
 
-        # Enrich uid_to_data with deterministic code_link.
-        prev_winner_uid = config.get("prev_winner_uid")
-        prev_winner_snapshot_epoch = _get_prev_winner_snapshot_epoch(prev_winner_uid)
+        entries_payload = []
+        for eid, entry in entries.items():
+            scores = score_dict.get(eid, {})
+            if eid == champion_eid:
+                kind, wins = "champion", None
+            elif eid in challenger_wins:
+                kind, wins = "challenger", challenger_wins[eid]
+            else:
+                kind, wins = "entrant", None
 
-        uid_to_data_enriched = {}
-        for uid, data in uid_to_data.items():
-            d = dict(data) if isinstance(data, dict) else data
-            try:
-                epoch_for_uid = epoch_number
-                if (
-                    prev_winner_uid is not None
-                    and int(uid) == int(prev_winner_uid)
-                    and prev_winner_snapshot_epoch is not None
-                ):
-                    epoch_for_uid = prev_winner_snapshot_epoch
+            snapshot_epoch = int(entry["snapshot_epoch"])
+            entries_payload.append(
+                {
+                    "entry_id": eid,
+                    "kind": kind,
+                    "wins": wins,
+                    "hotkey": entry.get("hotkey"),
+                    "uid": entry.get("uid"),
+                    "coldkey": entry.get("coldkey"),
+                    "snapshot_epoch": snapshot_epoch,
+                    "code_link": f"{snapshot_epoch}/{entry.get('hotkey')}",
+                    "submission_name": entry.get("submission_name"),
+                    "github_data": entry.get("github_data"),
+                    "entropy": _json_float(scores.get("entropy")),
+                    "ps_final_score": _json_float(scores.get("ps_final_score")),
+                    "molecules": _build_entry_molecules(valid_molecules_by_entry.get(eid), scores),
+                }
+            )
 
-                d["code_link"] = f"{int(epoch_for_uid)}/{int(uid)}"
-            except Exception as e:
-                bt.logging.warning(f"Failed to resolve snapshot key for uid={uid}: {e}")
-            d["submission_name"] = d.get("submission_name")
-            uid_to_data_enriched[uid] = d
-
-        uid_to_data_str = {str(k): v for k, v in uid_to_data_enriched.items()}
-        valid_molecules_str = {str(k): v for k, v in valid_molecules_by_uid.items()}
         allowed_reaction = _normalize_allowed_reaction(config.get("allowed_reaction"))
 
-        # Build POST payload
         payload = {
             "epoch": epoch_number,
             "target_proteins": target_proteins,
@@ -124,29 +146,22 @@ async def submit_epoch_results(
                 "entropy_threshold": config.get("entropy_min_threshold", 0.0),
                 "time_budget": config.get("time_budget_sec", 0),
                 "threshold_to_win": config.get("threshold_to_win", 0),
+                "wins_required": int(config.get("wins_required", 1)),
                 "allowed_reaction": allowed_reaction,
             },
-            "score_dict": score_dict_str,
-            "uid_to_data": uid_to_data_str,
-            "valid_molecules_by_uid": valid_molecules_str,
+            "entries": entries_payload,
             "scored_sample_data": scored_sample_data,
-            "winner_uid": winner_uid,
         }
         if benchmarks:
             payload["benchmarks"] = benchmarks
 
-        # Send via BackendAPI
         api = BackendAPI()
         success = await api.submit_epoch_results(payload)
 
         if success:
-            bt.logging.info(
-                f"Successfully submitted epoch {epoch_number} results to backend API"
-            )
+            bt.logging.info(f"Successfully submitted epoch {epoch_number} results to backend API")
         else:
-            bt.logging.warning(
-                f"Failed to submit epoch {epoch_number} results to backend API"
-            )
+            bt.logging.warning(f"Failed to submit epoch {epoch_number} results to backend API")
         return success
 
     except Exception as e:
