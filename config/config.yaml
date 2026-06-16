@@ -28,10 +28,10 @@ run:
   time_budget_sec: 900
   # One competition every day (UTC-aligned)
   competition_interval_seconds: 86400
-  # Initial minimum absolute improvement required to replace previous winner (e.g., 0.05 ~ 5%)
-  min_improvement_margin: 0.03
-  # Relative decay of the improvement margin per epoch/day (e.g., 0.2 = 20% decay -> 80% of previous each epoch)
-  min_improvement_decay_rate: 0.0285
+  # Consecutive epochs a frozen challenger must beat the champion to be promoted.
+  wins_required: 3
+  # Absolute score margin a challenger must clear to beat the champion.
+  improvement_margin: 0.01
   # If set, this UID receives the configured override share of weights.
   emission_target_override_uid: 54
   # Fraction of non-burn weights to route to the override UID
