@@ -1,25 +1,11 @@
 """
-Final scoring and winner determination functionality for the validator
+Per-molecule and final scoring for the validator.
 """
 
 import math
 import numpy as np
-import datetime
-from typing import Optional
 
 import bittensor as bt
-
-
-def compute_effective_min_improvement_margin(
-    base_margin: float,
-    age_epochs: int,
-    decay_rate: float,
-) -> float:
-    """Exponential decay of the improvement margin over `age_epochs` with a floor."""
-    MIN_MARGIN = 0.02
-    if decay_rate <= 0.0 or age_epochs <= 0:
-        return max(MIN_MARGIN, base_margin)
-    return max(MIN_MARGIN, base_margin * (1.0 - decay_rate) ** age_epochs)
 
 
 def calculate_final_scores(
@@ -102,105 +88,3 @@ def calculate_final_scores(
 
     return score_dict
 
-
-def determine_winner(
-    score_dict: dict[int, dict[str, list[list[float]]]],
-    current_epoch: int,
-    prev_winner_uid: Optional[int] = None,
-    min_improvement_margin: Optional[float] = None,
-) -> Optional[int]:
-    """
-    Determines the winning UID based on final score.
-    In case of ties, earliest submission time is used as the tiebreaker.
-    
-    Args:
-        score_dict: Dictionary containing final scores for each UID
-        
-    Returns:
-        Optional[int]: Winning UID or None if no valid scores found
-    """
-    best_score = -math.inf
-    best_uids = []
-
-    def parse_timestamp(uid):
-        ts = score_dict[uid].get('push_time', '')
-        try:
-            return datetime.datetime.fromisoformat(ts)
-        except Exception as e:
-            bt.logging.warning(f"Failed to parse timestamp '{ts}' for UID={uid}: {e}")
-            return datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
-
-    # def tie_breaker(tied_uids: list[int], best_score: float):
-    #     # Sort by block number first, then push time, then uid to ensure deterministic result
-    #     winner = sorted(tied_uids, key=lambda uid: (
-    #         score_dict[uid].get('block_submitted', float('inf')), 
-    #         parse_timestamp(uid), 
-    #         uid
-    #     ))[0]
-        
-    #     winner_block = score_dict[winner].get('block_submitted')
-    #     current_epoch = winner_block // 361 if winner_block else None
-    #     push_time = score_dict[winner].get('push_time', '')
-        
-    #     tiebreaker_message = f"Epoch {current_epoch} tiebreaker winner: UID={winner}, score={best_score}, block={winner_block}"
-    #     if push_time:
-    #         tiebreaker_message += f", push_time={push_time}"
-            
-    #     bt.logging.info(tiebreaker_message)
-            
-    #     return winner
-    
-    # Find highest final score
-    for uid, data in score_dict.items():
-        if 'ps_final_score' not in data:
-            continue
-        
-        score = round(data['ps_final_score'], 6)
-        
-        if score > best_score:
-            best_score = score
-            best_uids = [uid]
-        elif score == best_score:
-            best_uids.append(uid)
-    
-    if not best_uids:
-        bt.logging.info("No valid winner found (all scores -inf or no submissions).")
-        return None
-    
-    # Baseline winner (highest score)
-    winner = best_uids[0] if best_uids else None
-
-    # Prefer previous winner unless best improves by the configured margin
-    if (
-        winner is not None
-        and prev_winner_uid is not None
-        and prev_winner_uid in score_dict
-        and 'ps_final_score' in score_dict[prev_winner_uid]
-    ):
-        baseline = float(score_dict[prev_winner_uid]['ps_final_score'])
-        margin = float(min_improvement_margin)
-        if winner != prev_winner_uid:
-
-            required = baseline + margin
-            improvement = best_score - baseline
-
-            if best_score < required:
-                bt.logging.info(
-                    f"Previous winner retained: baseline={baseline:.6f}, best={best_score:.6f}, "
-                    f"improvement={improvement:.6f} < threshold={margin:.6f}"
-                )
-                winner = prev_winner_uid
-                best_score = baseline
-            else:
-                bt.logging.info(
-                    f"New winner beats previous: baseline={baseline:.6f}, best={best_score:.6f}, "
-                    f"improvement={improvement:.6f} >= threshold={margin:.6f}"
-                )
-        else:
-            bt.logging.info("Previous winner remains highest scorer")
-
-    if winner is not None:
-        bt.logging.info(f"Epoch {current_epoch} winner: UID={winner}, winning_score={best_score}")
-    
-    return winner
-    

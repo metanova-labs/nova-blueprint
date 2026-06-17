@@ -30,15 +30,15 @@ def _create_minio_client() -> Minio:
     return Minio(ep, access_key=access_key, secret_key=secret_key, secure=True)
 
 
-def _resolve_snapshot_key(epoch: int, uid: int) -> Optional[str]:
+def _resolve_snapshot_key(epoch: int, hotkey: str) -> Optional[str]:
     """
-    Resolve the object key in MinIO for a given (epoch, uid) using the configured bucket.
+    Resolve the object key in MinIO for a given (epoch, hotkey) using the configured bucket.
     Returns the key string, or None if no matching object exists.
     """
     client = _create_minio_client()
     bucket_name = SNAPSHOT_BUCKET
 
-    key = f"{int(epoch)}/{int(uid)}.tar.gz"
+    key = f"{int(epoch)}/{hotkey}.tar.gz"
     try:
         client.stat_object(bucket_name, key)
         return key
@@ -50,12 +50,12 @@ def _resolve_snapshot_key(epoch: int, uid: int) -> Optional[str]:
 
 def download_and_extract_snapshot(
     epoch: int,
-    uid: int,
+    hotkey: str,
     work_root: Path,
     dest_dir: Path,
 ) -> Optional[Path]:
     """
-    Download the archived snapshot for (epoch, uid) from MinIO and extract it into dest_dir.
+    Download the archived snapshot for (epoch, hotkey) from MinIO and extract it into dest_dir.
 
     Returns the extracted repository directory Path on success, or None if no snapshot exists.
     Raises on hard MinIO errors or filesystem issues.
@@ -63,13 +63,13 @@ def download_and_extract_snapshot(
     client = _create_minio_client()
     bucket_name = SNAPSHOT_BUCKET
 
-    key = _resolve_snapshot_key(epoch=epoch, uid=uid)
+    key = _resolve_snapshot_key(epoch=epoch, hotkey=hotkey)
     if not key:
         return None
 
     work_root = work_root.resolve()
     work_root.mkdir(parents=True, exist_ok=True)
-    archive_path = work_root / f"{epoch}_{uid}_snapshot.tar.gz"
+    archive_path = work_root / f"{epoch}_{hotkey}_snapshot.tar.gz"
 
     client.fget_object(bucket_name, key, str(archive_path))
 

@@ -19,6 +19,12 @@ from neurons.validator.code_archive import (
     download_and_extract_snapshot,
     download_benchmark_snapshot,
 )
+from neurons.validator.contest import (
+    entry_id,
+    load_contest_state,
+    save_contest_state,
+    WINNER_JSON_PATH,
+)
 from config.config_loader import load_config
 
 import bittensor as bt
@@ -47,6 +53,14 @@ class Miner:
     hotkey: str
     coldkey: Optional[str] = None
     submission_name: Optional[str] = None
+    entry_id: Optional[str] = None
+    kind: str = "entrant"  # entrant | champion | challenger | benchmark
+    snapshot_epoch: Optional[int] = None
+
+
+def _safe_path_token(value: str) -> str:
+    """Filesystem-safe token for workdir naming."""
+    return "".join(c if (c.isalnum() or c in "._-@") else "_" for c in str(value))
 
 
 def _is_emission_override_active(cfg: dict) -> bool:
@@ -80,6 +94,83 @@ def payout_blueprint_bounty(epoch: int, destination_coldkey: str) -> dict | None
     if not isinstance(body, dict):
         raise RuntimeError("blueprint bounty payout response was not a JSON object")
     return body
+
+
+def _fire_payout(epoch: int, coldkey: str, hotkey: str) -> None:
+    try:
+        payout = payout_blueprint_bounty(epoch=epoch, destination_coldkey=coldkey)
+        if payout is None:
+            bt.logging.warning("blueprint bounty: payout request was skipped due to missing authentication")
+            return
+        status = str(payout.get("status", "unknown"))
+        amount_alpha = payout.get("amount_alpha")
+        destination = payout.get("destination_coldkey", coldkey)
+        extrinsic_id = payout.get("extrinsic_id")
+        detail = payout.get("detail")
+        if status == "success":
+            bt.logging.info(f"rewarded {amount_alpha} alpha bounty to {destination}, extrinsic id: {extrinsic_id}")
+        else:
+            bt.logging.warning(
+                f"blueprint bounty payout status={status} destination={destination} "
+                f"amount_alpha={amount_alpha} extrinsic_id={extrinsic_id} detail={detail}"
+            )
+    except Exception as payout_err:
+        bt.logging.error(
+            f"blueprint bounty payout failed for hotkey={hotkey}: {type(payout_err).__name__}: {payout_err}"
+        )
+
+
+def _persist_champion_and_payout(state: dict, champion_score, epoch: int, cfg_all: dict) -> None:
+    """Mirror the champion to winner.json and pay the bounty when the champion hotkey changes."""
+    champion = state.get("champion")
+    if not champion:
+        return
+    try:
+        prev_hotkey = None
+        if WINNER_JSON_PATH.exists():
+            try:
+                with WINNER_JSON_PATH.open("r", encoding="utf-8") as f:
+                    prev_hotkey = json.load(f)["winner_snapshot"].get("hotkey")
+            except Exception:
+                prev_hotkey = None
+
+        if prev_hotkey == champion["hotkey"]:
+            bt.logging.info(f"champion unchanged hotkey={champion['hotkey']}; winner.json kept")
+            return
+
+        snapshot_epoch = int(champion["snapshot_epoch"])
+        winner_obj = {
+            "winner_snapshot": {
+                "uid": int(champion["uid"]),
+                "hotkey": champion["hotkey"],
+                "coldkey": champion.get("coldkey"),
+                "submission_name": champion.get("submission_name"),
+                "code_link": f"{snapshot_epoch}/{champion['hotkey']}",
+                "score": champion_score,
+                "snapshot_epoch": snapshot_epoch,
+                "updated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+            },
+            "emission_target_uid": int(champion["uid"]),
+        }
+        out_dir = WINNER_JSON_PATH.parent
+        out_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = out_dir / "winner.json.tmp"
+        with tmp_path.open("w", encoding="utf-8") as f:
+            json.dump(winner_obj, f, separators=(",", ":"))
+        os.replace(tmp_path, WINNER_JSON_PATH)
+        bt.logging.info(f"champion persisted hotkey={champion['hotkey']} at {WINNER_JSON_PATH}")
+
+        if _is_emission_override_active(cfg_all):
+            if prev_hotkey is None:
+                bt.logging.info("blueprint bounty: no previous champion recorded; skipping payout")
+            elif not champion.get("coldkey"):
+                bt.logging.error(
+                    f"blueprint bounty: champion hotkey={champion['hotkey']} missing coldkey; skipping payout"
+                )
+            else:
+                _fire_payout(epoch, str(champion["coldkey"]), str(champion["hotkey"]))
+    except Exception as e:
+        bt.logging.error(f"failed to persist champion: {type(e).__name__}: {e}")
 
 
 async def call_st(subtensor, network: Optional[str], rpc_fn, timeout_s: int = 10):
@@ -136,56 +227,64 @@ def fetch_submission_miners(period: int) -> List[Miner]:
                 hotkey=hotkey,
                 coldkey=str(coldkey) if coldkey is not None else None,
                 submission_name=str(submission_name) if submission_name is not None else None,
+                entry_id=entry_id(hotkey, period),
+                kind="entrant",
+                snapshot_epoch=int(period),
             )
         )
     miners.sort(key=lambda m: m.uid)
     return miners
 
 
-def get_previous_winner() -> Optional[tuple[Miner, int]]:
-    """
-    Read previous winner once and build a Miner with the original UID.
-    Returns (Miner, snapshot_epoch) or None if no previous winner is recorded.
-    """
-    try:
-        winner_json_path = Path("/data/results/winner.json")
-        if not winner_json_path.exists():
-            bt.logging.info("previous winner: no previous winner found; skipping")
-            return None
-        with winner_json_path.open("r", encoding="utf-8") as f:
-            last_win = json.load(f)
-        winner_snapshot = last_win["winner_snapshot"]
-        uid_val = int(winner_snapshot["uid"])
-        hotkey_val = str(winner_snapshot.get("hotkey") or "")
-        coldkey_val = winner_snapshot.get("coldkey")
-        submitted_at_utc_val = int(winner_snapshot.get("submitted_at_utc", 0) or 0)
-        snapshot_epoch_val = winner_snapshot["snapshot_epoch"]
-        snapshot_epoch_int = int(snapshot_epoch_val)
-        prev_winner = Miner(
-            uid=uid_val,
-            submitted_at_utc=submitted_at_utc_val,
-            hotkey=hotkey_val,
-            coldkey=str(coldkey_val) if coldkey_val else None,
-            submission_name=winner_snapshot.get("submission_name"),
-        )
-        return prev_winner, snapshot_epoch_int
-    except Exception as e:
-        bt.logging.error(f"previous winner: failed: {type(e).__name__}: {e}")
-        return None
+def _frozen_miner(member: dict, kind: str) -> Miner:
+    """Build a frozen Miner (champion/challenger) from contest state."""
+    snapshot_epoch = int(member["snapshot_epoch"])
+    hotkey = str(member["hotkey"])
+    return Miner(
+        uid=int(member["uid"]),
+        submitted_at_utc=0,
+        hotkey=hotkey,
+        coldkey=member.get("coldkey"),
+        submission_name=member.get("submission_name"),
+        entry_id=entry_id(hotkey, snapshot_epoch),
+        kind=kind,
+        snapshot_epoch=snapshot_epoch,
+    )
 
 
-def inject_previous_winner(miners: List[Miner], prev: Optional[Miner]) -> tuple[List[Miner], Optional[int]]:
+def build_run_list(entrants: List[Miner], state: dict) -> List[Miner]:
     """
-    Replace any submission for the previous winner's UID with the saved winner Miner.
-    Returns updated miners and the previous winner UID (if present).
+    Run list = champion + challengers (frozen, from state) + current entrants.
+
+    Keyed by entry_id (hotkey@snapshot_epoch), so a hotkey already frozen in the
+    pool can still run a fresh current-epoch submission as an entrant
     """
-    if prev is None:
-        return miners, None
-    updated = [m for m in miners if int(m.uid) != int(prev.uid)]
-    updated.append(prev)
-    bt.logging.info(f"previous winner: included uid={prev.uid}")
-    return updated, int(prev.uid)
-    
+    champion = state.get("champion")
+    challengers = state.get("challengers", [])
+
+    run_list: List[Miner] = []
+    seen_ids: set = set()
+
+    def _add(miner: Miner) -> None:
+        if miner.entry_id in seen_ids:
+            return
+        seen_ids.add(miner.entry_id)
+        run_list.append(miner)
+
+    if champion:
+        _add(_frozen_miner(champion, "champion"))
+    for challenger in challengers:
+        _add(_frozen_miner(challenger, "challenger"))
+    for miner in entrants:
+        _add(miner)
+
+    bt.logging.info(
+        f"run list: champion={'yes' if champion else 'no'} "
+        f"challengers={len(challengers)} total={len(run_list)}"
+    )
+    return run_list
+
+
 def ensure_miner_exists(repo_dir: Path) -> Path:
     miner_path = repo_dir / "miner.py"
     if not miner_path.is_file():
@@ -196,7 +295,7 @@ def ensure_miner_exists(repo_dir: Path) -> Path:
 def write_run_artifacts(runs_root: Path, period: int, miner: Miner, result_obj: Optional[Dict]) -> None:
     if result_obj is None:
         bt.logging.info(
-            f"run artifacts: uid={miner.uid} produced no result object; "
+            f"run artifacts: entry={miner.entry_id or miner.uid} produced no result object; "
             f"skipping write to period_{period}_results.jsonl"
         )
         return None
@@ -204,7 +303,10 @@ def write_run_artifacts(runs_root: Path, period: int, miner: Miner, result_obj: 
     results_dir.mkdir(parents=True, exist_ok=True)
 
     combined = {
+        "entry_id": miner.entry_id,
+        "kind": miner.kind,
         "uid": miner.uid,
+        "snapshot_epoch": miner.snapshot_epoch,
         "submitted_at_utc": miner.submitted_at_utc,
         "coldkey": miner.coldkey,
         "hotkey": miner.hotkey,
@@ -227,15 +329,14 @@ def run_job(
     work_root: Path,
     challenge_params: dict,
     period: int,
-    snapshot_epoch: Optional[int] = None,
 ) -> None:
     repo_dir: Optional[Path] = None
     result_obj: Optional[Dict] = None
 
     try:
-        dest = work_root / f"{period}_uid_{miner.uid}"
+        dest = work_root / f"{period}_{_safe_path_token(miner.entry_id or f'benchmark_{miner.uid}')}"
 
-        if int(miner.uid) < 0:
+        if miner.kind == "benchmark":
             try:
                 snapshot_name = _benchmark_snapshot_name(int(miner.uid))
                 repo_dir = download_benchmark_snapshot(
@@ -248,25 +349,28 @@ def run_job(
                 bt.logging.error(f"benchmark snapshot download failed: {type(e).__name__}: {e}")
                 return
         else:
-            effective_epoch = snapshot_epoch if snapshot_epoch is not None else period
+            effective_epoch = miner.snapshot_epoch if miner.snapshot_epoch is not None else period
             try:
                 repo_dir = download_and_extract_snapshot(
                     epoch=effective_epoch,
-                    uid=int(miner.uid),
+                    hotkey=miner.hotkey,
                     work_root=work_root,
                     dest_dir=dest,
                 )
                 if repo_dir is not None:
-                    bt.logging.info(f"using archived snapshot for uid={miner.uid} epoch={effective_epoch}")
+                    bt.logging.info(
+                        f"using archived snapshot for entry={miner.entry_id} epoch={effective_epoch}"
+                    )
             except Exception as e:
                 bt.logging.error(
-                    f"snapshot download failed for uid={miner.uid} epoch={effective_epoch}: {type(e).__name__}: {e}"
+                    f"snapshot download failed for entry={miner.entry_id} epoch={effective_epoch}: "
+                    f"{type(e).__name__}: {e}"
                 )
                 repo_dir = None
 
             if repo_dir is None:
                 bt.logging.info(
-                    f"no archived snapshot available for uid={miner.uid} epoch={effective_epoch}; skipping run"
+                    f"no archived snapshot available for entry={miner.entry_id} epoch={effective_epoch}; skipping run"
                 )
                 return
 
@@ -275,12 +379,9 @@ def run_job(
         runner.ensure_docker_image()
 
         workdir, outdir = runner.prepare_workdir(miner_dir, challenge_params, dest_dir=dest)
-        is_current_winner = snapshot_epoch is not None
-        start_prefix = "run started for current winner" if is_current_winner else "run started for"
-        start_msg = f"{start_prefix} uid={miner.uid}"
-        bt.logging.info(start_msg)
+        bt.logging.info(f"run started for {miner.kind} entry={miner.entry_id or miner.uid}")
         code, output = runner.run_container(workdir, outdir, period=period, uid=int(miner.uid))
-        bt.logging.info(f"run finished uid={miner.uid} exit={code}")
+        bt.logging.info(f"run finished entry={miner.entry_id or miner.uid} exit={code}")
         try:
             with open(outdir / "result.json", "r", encoding="utf-8") as f:
                 raw = json.load(f)
@@ -288,8 +389,8 @@ def run_job(
                 result_obj = raw["result"]
             elif isinstance(raw, dict):
                 result_obj = raw
-            # Persist benchmark scores before cleanup 
-            if int(miner.uid) == -1:
+            # Persist benchmark scores before cleanup
+            if miner.kind == "benchmark" and int(miner.uid) == -1:
                 try:
                     src_scores = outdir / "all_scores_0.json"
                     if src_scores.exists():
@@ -306,7 +407,7 @@ def run_job(
             result_obj = None
 
     except Exception as e:
-        bt.logging.error(f"run failed uid={miner.uid}: {type(e).__name__}: {e}")
+        bt.logging.error(f"run failed entry={miner.entry_id or miner.uid}: {type(e).__name__}: {e}")
     finally:
         if repo_dir is not None:
             try:
@@ -366,6 +467,7 @@ async def main() -> int:
             uid=BENCHMARK_UID_RANDOM,
             submitted_at_utc=now_ts,
             hotkey="benchmark",
+            kind="benchmark",
         )
         bt.logging.info(f"benchmark: running brute_force snapshot (uid={BENCHMARK_UID_RANDOM})")
         run_job(benchmark, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
@@ -377,42 +479,32 @@ async def main() -> int:
             uid=BENCHMARK_UID_THOMPSON,
             submitted_at_utc=now_ts,
             hotkey="benchmark",
+            kind="benchmark",
         )
         bt.logging.info(f"thompson_sampling: running snapshot (uid={BENCHMARK_UID_THOMPSON})")
         run_job(ts_benchmark, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
     except Exception as e:
         bt.logging.error(f"thompson_sampling run failed: {type(e).__name__}: {e}")
 
-    prev_winner_data = get_previous_winner()
-    if prev_winner_data is not None:
-        prev_winner, prev_snapshot_epoch = prev_winner_data
-        miners, prev_winner_uid = inject_previous_winner(miners, prev_winner)
-    else:
-        prev_winner_uid = None
-        prev_snapshot_epoch = None
+    state = load_contest_state()
+    run_list = build_run_list(miners, state)
 
     bench_scores_path = Path("/data/results") / f"period_{period}_benchmark_all_scores_0.json"
 
-    total_miners = len(miners)
-    for idx, miner in enumerate(miners, start=1):
-        bt.logging.info(f"running miner {idx}/{total_miners} uid={miner.uid}")
-        snapshot_epoch: Optional[int]
-        if prev_winner_uid is not None and miner.uid == prev_winner_uid and prev_snapshot_epoch is not None:
-            snapshot_epoch = prev_snapshot_epoch
-        else:
-            snapshot_epoch = None
+    total = len(run_list)
+    for idx, miner in enumerate(run_list, start=1):
+        bt.logging.info(f"running {idx}/{total} {miner.kind} entry={miner.entry_id}")
         run_job(
             miner,
             runs_root=runs_root,
             work_root=work_root,
             challenge_params=challenge_params,
             period=period,
-            snapshot_epoch=snapshot_epoch,
         )
 
     try:
         jsonl_path = (Path("/data/results") / f"period_{period}_results.jsonl")
-        uid_to_data: Dict[int, Dict] = {}
+        entries: Dict[str, Dict] = {}
         if jsonl_path.exists():
             with jsonl_path.open("r", encoding="utf-8") as f:
                 for line in f:
@@ -420,119 +512,46 @@ async def main() -> int:
                     if not line:
                         continue
                     rec = json.loads(line)
-                    uid = int(rec["uid"]) if "uid" in rec else None
+                    uid = int(rec["uid"]) if rec.get("uid") is not None else None
                     if uid is None or uid < 0:
+                        continue  # skip benchmark lines
+                    eid = rec.get("entry_id")
+                    if not eid:
                         continue
-                    molecules = rec.get("result", {}).get("molecules", [])
-                    uid_to_data[uid] = {
-                        "molecules": molecules,
+                    snapshot_epoch_val = rec.get("snapshot_epoch")
+                    entries[eid] = {
+                        "molecules": rec.get("result", {}).get("molecules", []),
                         "github_data": None,
                         "hotkey": rec.get("hotkey"),
+                        "uid": uid,
                         "coldkey": rec.get("coldkey"),
                         "submission_name": rec.get("submission_name"),
-                        "submitted_at_utc": int(rec.get("submitted_at_utc", 0) or 0),
+                        "snapshot_epoch": int(snapshot_epoch_val) if snapshot_epoch_val is not None else period,
+                        "kind": rec.get("kind", "entrant"),
                     }
+
         cfg = dict(challenge_params.get("config", {}))
         cfg.update(challenge_params.get("challenge", {}))
-        if prev_winner_uid is not None:
-            cfg["prev_winner_uid"] = prev_winner_uid
-        cfg["min_improvement_margin"] = cfg_all["min_improvement_margin"]
-        cfg["min_improvement_decay_rate"] = cfg_all["min_improvement_decay_rate"]
-        cfg["winner_snapshot_epoch"] = prev_snapshot_epoch
+        cfg["wins_required"] = int(cfg_all["wins_required"])
+        cfg["improvement_margin"] = float(cfg_all["improvement_margin"])
         cfg["time_budget_sec"] = cfg_all.get("time_budget_sec", 0)
 
-        winner_uid, winner_score = await scoring_module.process_epoch(
+        new_state, champion_entry_id, champion_score = await scoring_module.process_epoch(
             cfg,
             period,
-            uid_to_data,
+            entries,
+            state,
             str(bench_scores_path),
         )
-        # Persist winner only when winner UID changes.
+
         try:
-            if isinstance(winner_uid, int):
-                win = uid_to_data.get(winner_uid, {})
-                winner_json_path = Path("/data/results/winner.json")
-                prev_winner_uid: Optional[int] = None
-                if winner_json_path.exists():
-                    try:
-                        with winner_json_path.open("r", encoding="utf-8") as f:
-                            prev = json.load(f)
-                        prev_winner_uid = int(prev["winner_snapshot"]["uid"])
-                    except Exception:
-                        prev_winner_uid = None
-
-                if prev_winner_uid == winner_uid:
-                    bt.logging.info(
-                        f"winner unchanged uid={winner_uid}; keeping existing winner.json metadata unchanged"
-                    )
-                else:
-                    snapshot_epoch = period
-                    winner_code_link = f"{int(snapshot_epoch)}/{int(winner_uid)}"
-                    winner_obj = {
-                        "winner_snapshot": {
-                            "uid": winner_uid,
-                            "hotkey": win.get("hotkey"),
-                            "coldkey": win.get("coldkey"),
-                            "submission_name": win.get("submission_name"),
-                            "submitted_at_utc": int(win.get("submitted_at_utc", 0) or 0),
-                            "code_link": winner_code_link,
-                            "score": winner_score,
-                            "snapshot_epoch": snapshot_epoch,
-                            "updated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-                        },
-                        "emission_target_uid": winner_uid,
-                    }
-                    out_dir = Path("/data/results").resolve()
-                    out_dir.mkdir(parents=True, exist_ok=True)
-                    out_path = out_dir / "winner.json"
-                    tmp_path = out_dir / "winner.json.tmp"
-                    with tmp_path.open("w", encoding="utf-8") as f:
-                        json.dump(winner_obj, f, separators=(",", ":"))
-                    os.replace(tmp_path, out_path)
-                    bt.logging.info(f"winner persisted uid={winner_uid} at {out_path}")
-
-                    if _is_emission_override_active(cfg_all):
-                        if prev_winner_uid is None:
-                            bt.logging.info(
-                                "blueprint bounty: no previous winner recorded; skipping payout"
-                            )
-                        elif not win.get("coldkey"):
-                            bt.logging.error(
-                                f"blueprint bounty: winner uid={winner_uid} is missing a coldkey; skipping payout"
-                            )
-                        else:
-                            try:
-                                payout = payout_blueprint_bounty(
-                                    epoch=period,
-                                    destination_coldkey=str(win["coldkey"]),
-                                )
-                                if payout is None:
-                                    bt.logging.warning(
-                                        "blueprint bounty: payout request was skipped due to missing authentication"
-                                    )
-                                else:
-                                    status = str(payout.get("status", "unknown"))
-                                    amount_alpha = payout.get("amount_alpha")
-                                    destination = payout.get("destination_coldkey", win["coldkey"])
-                                    extrinsic_id = payout.get("extrinsic_id")
-                                    detail = payout.get("detail")
-                                    if status == "success":
-                                        bt.logging.info(
-                                            f"rewarded {amount_alpha} alpha bounty to {destination}, extrinsic id: {extrinsic_id}"
-                                        )
-                                    else:
-                                        bt.logging.warning(
-                                            f"blueprint bounty payout status={status} destination={destination} "
-                                            f"amount_alpha={amount_alpha} extrinsic_id={extrinsic_id} detail={detail}"
-                                        )
-                            except Exception as payout_err:
-                                bt.logging.error(
-                                    f"blueprint bounty payout failed for uid={winner_uid}: "
-                                    f"{type(payout_err).__name__}: {payout_err}"
-                                )
-
+            save_contest_state(new_state)
+            bt.logging.info("contest state persisted")
         except Exception as e:
-            bt.logging.error(f"failed to persist winner: {type(e).__name__}: {e}")
+            bt.logging.error(f"failed to persist contest state: {type(e).__name__}: {e}")
+
+        _persist_champion_and_payout(new_state, champion_score, period, cfg_all)
+
     except Exception as e:
         bt.logging.error(f"scoring step failed: {e}")
 

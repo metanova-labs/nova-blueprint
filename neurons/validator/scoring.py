@@ -21,11 +21,8 @@ if NOVA_DIR not in sys.path:
 from utils.proteins import get_sequence_from_protein_code, get_code_from_protein_sequence
 from neurons.validator.validity import validate_molecules_and_calculate_entropy
 from PSICHIC.wrapper import PsichicWrapper
-from neurons.validator.ranking import (
-    calculate_final_scores,
-    determine_winner,
-    compute_effective_min_improvement_margin,
-)
+from neurons.validator.ranking import calculate_final_scores
+from neurons.validator.contest import apply_contest_transition
 from neurons.validator.save_data import submit_epoch_results
 
 # Global variable to store PSICHIC instance - will be set by validator.py
@@ -124,17 +121,19 @@ def _build_thompson_benchmark_payload(
 async def process_epoch(
     config,
     epoch_number: int,
-    uid_to_data: dict,
+    entries: dict,
+    state: dict,
     scored_sample_path: str,
 ):
     """
-    Process a single epoch end-to-end.
+    Score every entry (keyed by entry_id) and resolve the champion contest.
+
+    Returns (new_state, champion_entry_id, champion_score).
     """
     global psichic
     try:
         current_epoch = epoch_number
-        
-        # get target and antitarget sequences from config
+
         target_sequences = config["target_sequences"]
         antitarget_sequences = config["antitarget_sequences"]
         allowed_reaction = config.get("allowed_reaction")
@@ -150,71 +149,59 @@ async def process_epoch(
 
         bt.logging.info(f"Scoring using target proteins: {target_codes}, antitarget proteins: {antitarget_codes}")
 
-        if not uid_to_data:
+        if not entries:
             bt.logging.info("No valid submissions found this epoch.")
-            return None
+            return state, None, None
 
         # Initialize scoring structure
         score_dict = {
-            uid: {
+            eid: {
                 "ps_target_scores": [[] for _ in range(len(target_codes))],
                 "ps_antitarget_scores": [[] for _ in range(len(antitarget_codes))],
                 "entropy": None,
-                "github_data": uid_to_data[uid].get("raw", None)
+                "github_data": entries[eid].get("github_data"),
             }
-            for uid in uid_to_data
+            for eid in entries
         }
 
         # Validate molecules and calculate entropy
-        valid_molecules_by_uid = validate_molecules_and_calculate_entropy(
-            uid_to_data=uid_to_data,
+        valid_molecules_by_entry = validate_molecules_and_calculate_entropy(
+            uid_to_data=entries,
             score_dict=score_dict,
             config=config,
-            allowed_reaction=allowed_reaction
+            allowed_reaction=allowed_reaction,
         )
 
         # Initialize and use PSICHIC model
         if psichic is None:
             psichic = PsichicWrapper()
             bt.logging.info("PSICHIC model initialized successfully")
-        
+
         # Score all target proteins then all antitarget proteins one protein at a time
         score_all_proteins_psichic(
             target_proteins=target_sequences,
             antitarget_proteins=antitarget_sequences,
             score_dict=score_dict,
-            valid_molecules_by_uid=valid_molecules_by_uid,
-            uid_to_data=uid_to_data,
-            batch_size=32
+            valid_molecules_by_uid=valid_molecules_by_entry,
+            uid_to_data=entries,
+            batch_size=32,
         )
 
         # Calculate final scores
         score_dict = calculate_final_scores(
-            score_dict, valid_molecules_by_uid, config, current_epoch
+            score_dict, valid_molecules_by_entry, config, current_epoch
         )
 
-        # Determine winner
-        prev_winner_uid = config.get("prev_winner_uid")
-        base_margin = float(config["min_improvement_margin"])
-        decay_rate = float(config["min_improvement_decay_rate"])
-        snapshot_epoch = config.get("winner_snapshot_epoch")
-        DECAY_START_EPOCH = 20462  # rollout start epoch for decay
-        if snapshot_epoch is None:
-            age_epochs = 0
-        else:
-            effective_snapshot = int(snapshot_epoch)
-            if DECAY_START_EPOCH is not None:
-                effective_snapshot = max(effective_snapshot, DECAY_START_EPOCH)
-            age_epochs = max(0, int(current_epoch) - effective_snapshot - 1)
-        min_improvement_margin = compute_effective_min_improvement_margin(
-            base_margin, age_epochs, decay_rate
-        )
-        config["threshold_to_win"] = float(min_improvement_margin)
-        winner = determine_winner(
-            score_dict,
-            current_epoch,
-            prev_winner_uid=prev_winner_uid,
-            min_improvement_margin=min_improvement_margin,
+        # The margin a challenger must clear to beat the champion (stored on the competition row).
+        config["threshold_to_win"] = float(config["improvement_margin"])
+
+        # Resolve the champion contest
+        new_state, champion_entry_id, champion_score = apply_contest_transition(
+            score_dict=score_dict,
+            entries=entries,
+            state=state,
+            cfg=config,
+            epoch=epoch_number,
         )
 
         # Yield so ws heartbeats can run before the next RPC
@@ -237,11 +224,11 @@ async def process_epoch(
                         epoch_number=epoch_number,
                         target_proteins=target_codes,
                         antitarget_proteins=antitarget_codes,
-                        uid_to_data=uid_to_data,
-                        valid_molecules_by_uid=valid_molecules_by_uid,
+                        entries=entries,
+                        valid_molecules_by_entry=valid_molecules_by_entry,
                         score_dict=score_dict,
+                        state=new_state,
                         scored_sample_path=scored_sample_path,
-                        winner_uid=winner,
                         benchmarks=benchmarks_payload,
                     )
                     if status:
@@ -249,37 +236,11 @@ async def process_epoch(
         except Exception as e:
             bt.logging.error(f"Failed to submit results to dashboard DB: {e}")
 
-        # Monitor validators
-        # if not bool(getattr(config, 'test_mode', False)):
-        #     try:
-        #         set_weights_call_block = await subtensor.get_current_block()
-        #     except asyncio.CancelledError:
-        #         bt.logging.info("Resetting subtensor connection.")
-        #         subtensor = bt.async_subtensor(network=config.network)
-        #         await subtensor.initialize()
-        #         await asyncio.sleep(1)
-        #         set_weights_call_block = await subtensor.get_current_block()
-        #     monitor_validator(
-        #         score_dict=score_dict,
-        #         metagraph=metagraph,
-        #         current_epoch=current_epoch,
-        #         current_block=set_weights_call_block,
-        #         validator_hotkey=wallet.hotkey.ss58_address,
-        #         winning_uid=winner
-        #     )
-
-        if winner is not None:
-            try:
-                winner_score = float(score_dict[winner].get('ps_final_score'))
-            except Exception:
-                winner_score = None
-        else:
-            winner_score = None
-        return winner, winner_score
+        return new_state, champion_entry_id, champion_score
 
     except Exception as e:
         bt.logging.error(f"Error processing epoch: {e}")
-        return None, None
+        return state, None, None
 
 def score_all_proteins_psichic(
     target_proteins: list[str],

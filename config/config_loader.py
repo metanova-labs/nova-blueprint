@@ -34,8 +34,8 @@ def load_config(path: str = os.path.join(BASE_DIR, "config/config.yaml")):
     time_budget_sec = int(run_cfg.get("time_budget_sec", 600))
     competition_interval_seconds = run_cfg.get("competition_interval_seconds")
     competition_interval_seconds = int(competition_interval_seconds)
-    min_improvement_margin = float(run_cfg["min_improvement_margin"])
-    min_improvement_decay_rate = float(run_cfg["min_improvement_decay_rate"])
+    wins_required = int(run_cfg["wins_required"])
+    improvement_margin = float(run_cfg["improvement_margin"])
     emission_target_override_uid = run_cfg.get("emission_target_override_uid")
     if emission_target_override_uid is not None:
         emission_target_override_uid = int(emission_target_override_uid)
@@ -53,8 +53,8 @@ def load_config(path: str = os.path.join(BASE_DIR, "config/config.yaml")):
         'random_valid_reaction': random_valid_reaction,
         'time_budget_sec': time_budget_sec,
         'competition_interval_seconds': competition_interval_seconds,
-        'min_improvement_margin': min_improvement_margin,
-        'min_improvement_decay_rate': min_improvement_decay_rate,
+        'wins_required': wins_required,
+        'improvement_margin': improvement_margin,
         'emission_target_override_uid': emission_target_override_uid,
         'emission_target_override_share': emission_target_override_share,
     }
