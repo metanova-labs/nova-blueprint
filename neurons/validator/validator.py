@@ -254,27 +254,29 @@ def _frozen_miner(member: dict, kind: str) -> Miner:
 
 def build_run_list(entrants: List[Miner], state: dict) -> List[Miner]:
     """
-    Run list = champion + challengers (frozen, from state) + entrants whose
-    hotkey is not already in the contest pool.
+    Run list = champion + challengers (frozen, from state) + current entrants.
+
+    Keyed by entry_id (hotkey@snapshot_epoch), so a hotkey already frozen in the
+    pool can still run a fresh current-epoch submission as an entrant
     """
     champion = state.get("champion")
     challengers = state.get("challengers", [])
 
     run_list: List[Miner] = []
-    pool_hotkeys = set()
+    seen_ids: set = set()
+
+    def _add(miner: Miner) -> None:
+        if miner.entry_id in seen_ids:
+            return
+        seen_ids.add(miner.entry_id)
+        run_list.append(miner)
 
     if champion:
-        run_list.append(_frozen_miner(champion, "champion"))
-        pool_hotkeys.add(str(champion["hotkey"]))
+        _add(_frozen_miner(champion, "champion"))
     for challenger in challengers:
-        run_list.append(_frozen_miner(challenger, "challenger"))
-        pool_hotkeys.add(str(challenger["hotkey"]))
-
+        _add(_frozen_miner(challenger, "challenger"))
     for miner in entrants:
-        if miner.hotkey in pool_hotkeys:
-            bt.logging.info(f"run list: skipping entrant hotkey={miner.hotkey} (already in contest pool)")
-            continue
-        run_list.append(miner)
+        _add(miner)
 
     bt.logging.info(
         f"run list: champion={'yes' if champion else 'no'} "

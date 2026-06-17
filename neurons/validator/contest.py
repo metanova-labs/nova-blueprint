@@ -5,9 +5,6 @@ A frozen champion is re-run every epoch. A frozen challenger must beat the
 current champion by `improvement_margin` for `wins_required` consecutive epochs
 (single elimination) to be promoted. A live entrant that beats the champion is
 admitted as a challenger with wins=1 (its qualifying beat is win #1).
-
-This module owns all contest bookkeeping so the rest of the validator stays thin.
-State is identity-only; scores are recomputed every epoch.
 """
 
 import datetime as dt
@@ -58,10 +55,7 @@ def _finite_score(score_dict: dict, eid: str) -> Optional[float]:
 
 
 def load_contest_state() -> dict:
-    """
-    Load contest state. If absent, bootstrap the champion from winner.json so the
-    cutover is zero-disruption. Returns {champion, challengers, updated_at}.
-    """
+    """Load contest state; bootstrap the champion from winner.json if absent."""
     try:
         if CONTEST_STATE_PATH.exists():
             with CONTEST_STATE_PATH.open("r", encoding="utf-8") as f:
@@ -188,9 +182,8 @@ def apply_contest_transition(
     if ready:
         return _promote(ready, survivors, score_dict)
 
-    pool_hotkeys = {champion["hotkey"]} | {m["hotkey"] for m in survivors}
     for eid, entry in entries.items():
-        if entry.get("kind") != "entrant" or entry["hotkey"] in pool_hotkeys:
+        if entry.get("kind") != "entrant":
             continue
         score = _finite_score(score_dict, eid)
         if score is None or score < threshold:
@@ -198,7 +191,6 @@ def apply_contest_transition(
         admitted = _identity(entry)
         admitted["wins"] = 1
         survivors.append(admitted)
-        pool_hotkeys.add(entry["hotkey"])
 
     ready = [m for m in survivors if int(m.get("wins", 0)) >= wins_required]
     if ready:  # only reachable when wins_required == 1 (entry beat is win #1)

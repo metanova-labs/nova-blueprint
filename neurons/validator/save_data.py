@@ -76,11 +76,7 @@ async def submit_epoch_results(
     scored_sample_path: str = os.path.join(BASE_DIR, "all_scores_0.json"),
     benchmarks: list[dict] | None = None,
 ) -> bool:
-    """
-    Submit one epoch of results to the backend as a single self-contained
-    entries[] payload (each entry carries its identity, role, score and
-    pre-zipped molecules). Best-effort; never raises into the caller.
-    """
+    """Submit one epoch of results to the backend as an entries[] payload."""
     try:
         from utils.BackendAPI import BackendAPI
 
@@ -94,7 +90,6 @@ async def submit_epoch_results(
                     f"Failed to load scored sample data from {scored_sample_path}: {e}"
                 )
 
-        # Post-transition roles drive each entry's kind/wins.
         champion = (state or {}).get("champion")
         champion_eid = entry_id(champion["hotkey"], champion["snapshot_epoch"]) if champion else None
         challenger_wins = {

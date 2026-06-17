@@ -153,7 +153,7 @@ async def process_epoch(
             bt.logging.info("No valid submissions found this epoch.")
             return state, None, None
 
-        # Initialize scoring structure (keyed by entry_id)
+        # Initialize scoring structure
         score_dict = {
             eid: {
                 "ps_target_scores": [[] for _ in range(len(target_codes))],
