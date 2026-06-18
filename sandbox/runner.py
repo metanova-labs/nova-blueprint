@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -92,7 +93,9 @@ def run_container(workdir: Path, outdir: Path, period: int, uid: int) -> Tuple[i
     host_uid = os.stat(PROJECT_ROOT).st_uid
     host_gid = os.stat(PROJECT_ROOT).st_gid
 
-    container_name = f"miner-sbx-{workdir.name}".lower().replace(" ", "-")
+    # Docker container names allow only [a-zA-Z0-9][a-zA-Z0-9_.-]; entry_id workdirs
+    # contain '@' (hotkey@epoch), so sanitize anything outside that set.
+    container_name = re.sub(r"[^a-z0-9_.-]", "-", f"miner-sbx-{workdir.name}".lower())
     # Ensure any previous container with the same name is removed
     try:
         subprocess.run(
