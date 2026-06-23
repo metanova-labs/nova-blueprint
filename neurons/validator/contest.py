@@ -106,14 +106,16 @@ def _promote(
     survivors: list,
     score_dict: dict,
 ) -> Tuple[dict, str, Optional[float]]:
-    """Promote the highest-scoring ready challenger; reset other survivors to wins=0."""
-    winner = max(ready, key=lambda m: _finite_score(score_dict, _member_entry_id(m)) or -math.inf)
+    """Promote the challenger with the best average score across its winning epochs; reset others to wins=0."""
+    # Tied challengers share the same win count, so max score_sum ranks them by best average.
+    winner = max(ready, key=lambda m: float(m.get("score_sum", 0.0)))
     new_challengers = []
     for member in survivors:
         if member is winner:
             continue
         reset = dict(member)
         reset["wins"] = 0
+        reset["score_sum"] = 0.0
         new_challengers.append(reset)
     new_state = {"champion": _identity(winner), "challengers": new_challengers, "updated_at": _now()}
     weid = _member_entry_id(winner)
@@ -135,7 +137,7 @@ def apply_contest_transition(
     - Champion infra-failure (no finite score): freeze transitions, keep state.
     - Each challenger beating champion by margin: wins += 1; failing: eliminated;
       infra-failing (no result): skipped, wins kept.
-    - A challenger reaching wins_required is promoted (highest scorer wins ties);
+    - A challenger reaching wins_required is promoted (ties broken by best average score across winning epochs);
       surviving challengers reset to wins=0; old champion dropped; no admission.
     - Otherwise admit entrants beating champion by margin as challengers wins=1.
     """
@@ -175,6 +177,7 @@ def apply_contest_transition(
         if cscore >= threshold:
             advanced = dict(challenger)
             advanced["wins"] = int(challenger.get("wins", 0)) + 1
+            advanced["score_sum"] = float(challenger.get("score_sum", 0.0)) + cscore
             survivors.append(advanced)
         # else: loss -> eliminated (dropped)
 
@@ -190,6 +193,7 @@ def apply_contest_transition(
             continue
         admitted = _identity(entry)
         admitted["wins"] = 1
+        admitted["score_sum"] = score
         survivors.append(admitted)
 
     ready = [m for m in survivors if int(m.get("wins", 0)) >= wins_required]
