@@ -97,7 +97,7 @@ def save_contest_state(state: dict) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     tmp_path = out_dir / "contest_state.json.tmp"
     with tmp_path.open("w", encoding="utf-8") as f:
-        json.dump(state, f, separators=(",", ":"))
+        json.dump(state, f, indent=2)
     os.replace(tmp_path, CONTEST_STATE_PATH)
 
 
