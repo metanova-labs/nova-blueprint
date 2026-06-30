@@ -29,7 +29,7 @@ run:
   # One competition every day (UTC-aligned)
   competition_interval_seconds: 86400
   # Consecutive epochs a frozen challenger must beat the champion to be promoted.
-  wins_required: 3
+  wins_required: 4
   # Absolute score margin a challenger must clear to beat the champion.
   improvement_margin: 0.04
   # If set, this UID receives the configured override share of weights.
