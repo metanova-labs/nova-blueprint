@@ -209,30 +209,28 @@ async def process_epoch(
 
         # Submit results to dashboard API if configured
         try:
-            if not bool(config.get("test_mode")):
-                submit_url = os.environ.get('SUBMIT_RESULTS_URL')
-                if submit_url:
-                    benchmarks_payload = _build_thompson_benchmark_payload(
-                        epoch_number=epoch_number,
-                        config=config,
-                        current_epoch=current_epoch,
-                        target_sequences=target_sequences,
-                        antitarget_sequences=antitarget_sequences,
-                    )
-                    status = await submit_epoch_results(
-                        config=config,
-                        epoch_number=epoch_number,
-                        target_proteins=target_codes,
-                        antitarget_proteins=antitarget_codes,
-                        entries=entries,
-                        valid_molecules_by_entry=valid_molecules_by_entry,
-                        score_dict=score_dict,
-                        state=new_state,
-                        scored_sample_path=scored_sample_path,
-                        benchmarks=benchmarks_payload,
-                    )
-                    if status:
-                        bt.logging.info("Submitted results to dashboard DB")
+            if os.environ.get("BACKEND_API_URL"):
+                benchmarks_payload = _build_thompson_benchmark_payload(
+                    epoch_number=epoch_number,
+                    config=config,
+                    current_epoch=current_epoch,
+                    target_sequences=target_sequences,
+                    antitarget_sequences=antitarget_sequences,
+                )
+                status = await submit_epoch_results(
+                    config=config,
+                    epoch_number=epoch_number,
+                    target_proteins=target_codes,
+                    antitarget_proteins=antitarget_codes,
+                    entries=entries,
+                    valid_molecules_by_entry=valid_molecules_by_entry,
+                    score_dict=score_dict,
+                    state=new_state,
+                    scored_sample_path=scored_sample_path,
+                    benchmarks=benchmarks_payload,
+                )
+                if status:
+                    bt.logging.info("Submitted results to dashboard DB")
         except Exception as e:
             bt.logging.error(f"Failed to submit results to dashboard DB: {e}")
 
