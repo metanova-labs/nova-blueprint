@@ -23,6 +23,12 @@ def get_config():
                        help='Run test validator without setting weights')
 
     config = bt.Config(parser)
+
+    parsed_args, _ = parser.parse_known_args()
+    for _field in ("name", "hotkey", "path"):
+        _val = getattr(parsed_args, f"wallet.{_field}", None)
+        if _val is not None:
+            setattr(config.wallet, _field, _val)
     config.netuid = 68
     config.network = os.environ.get("SUBTENSOR_NETWORK")
     with bt.Subtensor(network=config.network) as subtensor:
