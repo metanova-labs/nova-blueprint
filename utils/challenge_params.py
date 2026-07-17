@@ -16,6 +16,7 @@ def _extract_miner_config(cfg: dict) -> Dict[str, Any]:
         "min_rotatable_bonds": cfg["min_rotatable_bonds"],
         "max_rotatable_bonds": cfg["max_rotatable_bonds"],
         "num_molecules": cfg["num_molecules"],
+        "tanimoto_max_threshold": cfg["tanimoto_max_threshold"],
     }
 
 
