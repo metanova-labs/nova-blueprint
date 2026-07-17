@@ -13,3 +13,4 @@ debug/
 artifacts/
 miner_runs_old/
 scripts/
+local/
