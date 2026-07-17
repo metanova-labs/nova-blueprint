@@ -3,7 +3,6 @@ import os
 import sys
 from dotenv import load_dotenv
 import bittensor as bt
-from substrateinterface import SubstrateInterface
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 sys.path.append(BASE_DIR)
@@ -17,17 +16,17 @@ def get_config():
     """
     load_dotenv()
     parser = argparse.ArgumentParser('Nova')
-    bt.wallet.add_args(parser)
-    bt.subtensor.add_args(parser)
+    bt.Wallet.add_args(parser)
+    bt.Subtensor.add_args(parser)
     
     parser.add_argument('--test_mode', action='store_true', 
                        help='Run test validator without setting weights')
 
-    config = bt.config(parser)
+    config = bt.Config(parser)
     config.netuid = 68
     config.network = os.environ.get("SUBTENSOR_NETWORK")
-    node = SubstrateInterface(url=config.network)
-    config.epoch_length = node.query("SubtensorModule", "Tempo", [config.netuid]).value + 1
+    with bt.Subtensor(network=config.network) as subtensor:
+        config.epoch_length = subtensor.tempo(config.netuid) + 1
 
     # Load configuration options
     config.update(load_config())

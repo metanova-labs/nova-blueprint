@@ -135,9 +135,9 @@ def setup_and_check_registration():
     setup_logging(cfg)
 
     async def _check_reg():
-        subtensor = bt.async_subtensor(network=cfg.network)
+        subtensor = bt.AsyncSubtensor(network=cfg.network)
         await subtensor.initialize()
-        wallet = bt.wallet(name=cfg.wallet.name, hotkey=cfg.wallet.hotkey)
+        wallet = bt.Wallet(name=cfg.wallet.name, hotkey=cfg.wallet.hotkey)
         await check_registration(wallet, subtensor, cfg.netuid)
 
     asyncio.run(_check_reg())

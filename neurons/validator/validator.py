@@ -184,7 +184,7 @@ async def call_st(subtensor, network: Optional[str], rpc_fn, timeout_s: int = 10
     except (asyncio.TimeoutError, Exception) as e:
         bt.logging.warning(f"Subtensor RPC reconnect triggered due to {type(e).__name__}: {e}")
         await subtensor.close()
-        st = bt.async_subtensor(network=network)
+        st = bt.AsyncSubtensor(network=network)
         await st.initialize()
         res = await asyncio.wait_for(rpc_fn(st), timeout=timeout_s)
         return res, st
@@ -430,7 +430,7 @@ async def main() -> int:
 
     network = os.environ.get("SUBTENSOR_NETWORK")
 
-    subtensor = bt.async_subtensor(network=network)
+    subtensor = bt.AsyncSubtensor(network=network)
     await subtensor.initialize()
     current_block, subtensor = await call_st(subtensor, network, lambda st: st.get_current_block(), timeout_s=10)
 

@@ -30,8 +30,8 @@ def apply_weights(
         bt.logging.error(f"weights: missing required env: {', '.join(missing)}")
         return
 
-    wallet = bt.wallet(name=wallet_name, hotkey=wallet_hotkey)
-    with bt.subtensor(network=network) as subtensor:
+    wallet = bt.Wallet(name=wallet_name, hotkey=wallet_hotkey)
+    with bt.Subtensor(network=network) as subtensor:
         metagraph = subtensor.metagraph(NETUID)
 
         # Registration check
@@ -78,7 +78,7 @@ def apply_weights(
                     f"weights: attempt {attempt} apply winner_uid={winner_uid} "
                     f"override_uid={override_uid} override_share={override_share:.4f} burn={BURN_RATE}"
                 )
-                success, message = subtensor.set_weights(
+                response = subtensor.set_weights(
                     wallet=wallet,
                     netuid=NETUID,
                     mechid=MECH_ID,
@@ -86,6 +86,8 @@ def apply_weights(
                     weights=weights,
                     wait_for_inclusion=True,
                 )
+                success = bool(getattr(response, "success", False))
+                message = getattr(response, "message", None) or getattr(response, "error", None)
                 bt.logging.info(f"weights: set_weights success={success} message={message}")
                 if success is True:
                     return
