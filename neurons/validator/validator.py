@@ -421,6 +421,7 @@ def run_job(
 
 
 async def main() -> int:
+    bt.logging.enable_info()
     runs_root = Path("/data/results").resolve()
     work_root = Path("/data/miner_runs").resolve()
     runs_root.mkdir(parents=True, exist_ok=True)

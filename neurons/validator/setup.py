@@ -41,11 +41,10 @@ def get_config():
 
 def setup_logging(config):
     """
-    Configures Bittensor logging to write logs to a file named `validator.log` 
-    in the same directory as this Python file
+    bittensor 10.x defaults its console logger to WARNING+ (9.x emitted INFO);
+    turn INFO back on so validator output reaches stdout (and Promtail).
     """
-    # script_dir = os.path.dirname(os.path.abspath(__file__))
-    # bt.logging(config=config, logging_dir=script_dir, record_log=True)
+    bt.logging.enable_info()
 
     bt.logging.info(f"Running validator for subnet: {config.netuid} on network: {config.subtensor.network} with config:")
     bt.logging.info(config)
