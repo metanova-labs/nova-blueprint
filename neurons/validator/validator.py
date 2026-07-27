@@ -340,7 +340,10 @@ def run_job(
     result_obj: Optional[Dict] = None
 
     try:
-        dest = work_root / f"{period}_{_safe_path_token(miner.entry_id or f'benchmark_{miner.uid}')}"
+        # One token names the workdir, the container and the log stream, so a single
+        # run is greppable across disk, docker and loki.
+        entry_token = miner.entry_id or f"benchmark_{miner.uid}"
+        dest = work_root / f"{period}_{_safe_path_token(entry_token)}"
 
         if miner.kind == "benchmark":
             try:
@@ -385,9 +388,9 @@ def run_job(
         runner.ensure_docker_image()
 
         workdir, outdir = runner.prepare_workdir(miner_dir, challenge_params, dest_dir=dest)
-        bt.logging.info(f"run started for {miner.kind} entry={miner.entry_id or miner.uid}")
-        code, output = runner.run_container(workdir, outdir, period=period, uid=miner.uid)
-        bt.logging.info(f"run finished entry={miner.entry_id or miner.uid} exit={code}")
+        bt.logging.info(f"run started for {miner.kind} entry={entry_token}")
+        code, output = runner.run_container(workdir, outdir, period=period, entry_id=entry_token)
+        bt.logging.info(f"run finished entry={entry_token} exit={code}")
         try:
             with open(outdir / "result.json", "r", encoding="utf-8") as f:
                 raw = json.load(f)
@@ -413,7 +416,7 @@ def run_job(
             result_obj = None
 
     except Exception as e:
-        bt.logging.error(f"run failed entry={miner.entry_id or miner.uid}: {type(e).__name__}: {e}")
+        bt.logging.error(f"run failed entry={entry_token}: {type(e).__name__}: {e}")
     finally:
         if repo_dir is not None:
             try:

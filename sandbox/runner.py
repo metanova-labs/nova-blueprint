@@ -67,7 +67,7 @@ def prepare_workdir(source_dir: Path, challenge_params: dict, dest_dir: Optional
     return workdir, outdir
 
 
-def run_container(workdir: Path, outdir: Path, period: int, uid: Optional[int]) -> Tuple[int, str]:
+def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tuple[int, str]:
     timeout_seconds = load_time_budget_sec() 
     def _to_str(x) -> str:
         if x is None:
@@ -131,7 +131,7 @@ def run_container(workdir: Path, outdir: Path, period: int, uid: Optional[int]) 
         "--label", "app=nova_blueprint",
         "--label", "role=miner",
         "--label", f"period={period}",
-        "--label", f"uid={_to_str(uid)}",
+        "--label", f"entry_id={entry_id}",
         "--name", container_name,
         SANDBOX_IMAGE_TAG,
     ]
