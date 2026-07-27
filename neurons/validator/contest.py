@@ -80,7 +80,7 @@ def _bootstrap_champion_from_winner_json() -> Optional[dict]:
             snapshot = json.load(f)["winner_snapshot"]
         return {
             "hotkey": str(snapshot["hotkey"]),
-            "uid": int(snapshot["uid"]),
+            "uid": snapshot.get("uid"),
             "snapshot_epoch": int(snapshot["snapshot_epoch"]),
             "coldkey": snapshot.get("coldkey"),
             "submission_name": snapshot.get("submission_name"),

@@ -48,7 +48,7 @@ def _benchmark_snapshot_name(uid: int) -> str:
 
 @dataclass
 class Miner:
-    uid: int
+    uid: Optional[int]
     submitted_at_utc: int
     hotkey: str
     coldkey: Optional[str] = None
@@ -141,7 +141,7 @@ def _persist_champion_and_payout(state: dict, champion_score, epoch: int, cfg_al
         snapshot_epoch = int(champion["snapshot_epoch"])
         winner_obj = {
             "winner_snapshot": {
-                "uid": int(champion["uid"]),
+                "uid": champion.get("uid"),
                 "hotkey": champion["hotkey"],
                 "coldkey": champion.get("coldkey"),
                 "submission_name": champion.get("submission_name"),
@@ -150,7 +150,7 @@ def _persist_champion_and_payout(state: dict, champion_score, epoch: int, cfg_al
                 "snapshot_epoch": snapshot_epoch,
                 "updated_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
             },
-            "emission_target_uid": int(champion["uid"]),
+            "emission_target_uid": champion.get("uid"),
         }
         out_dir = WINNER_JSON_PATH.parent
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -215,7 +215,11 @@ def fetch_submission_miners(period: int) -> List[Miner]:
 
     miners: List[Miner] = []
     for item in items:
-        uid = int(item["uid"])
+        # Credit-mode entrants pay per epoch instead of holding a registration, so
+        # the api returns uid null for them. This is the only place uid is coerced;
+        # every later hop reads it back from json as int-or-null and just carries it.
+        raw_uid = item.get("uid")
+        uid = int(raw_uid) if raw_uid is not None else None
         hotkey = str(item["hotkey"])
         coldkey = item["coldkey"]
         submitted_at_utc = int(item["submitted_at_utc"])
@@ -232,7 +236,9 @@ def fetch_submission_miners(period: int) -> List[Miner]:
                 snapshot_epoch=int(period),
             )
         )
-    miners.sort(key=lambda m: m.uid)
+    # No sort: the api returns entrants oldest-submission-first, which is both
+    # deterministic and meaningful. Champion/challenger ordering is set by
+    # build_run_list, not here.
     return miners
 
 
@@ -241,7 +247,7 @@ def _frozen_miner(member: dict, kind: str) -> Miner:
     snapshot_epoch = int(member["snapshot_epoch"])
     hotkey = str(member["hotkey"])
     return Miner(
-        uid=int(member["uid"]),
+        uid=member.get("uid"),
         submitted_at_utc=0,
         hotkey=hotkey,
         coldkey=member.get("coldkey"),
@@ -380,7 +386,7 @@ def run_job(
 
         workdir, outdir = runner.prepare_workdir(miner_dir, challenge_params, dest_dir=dest)
         bt.logging.info(f"run started for {miner.kind} entry={miner.entry_id or miner.uid}")
-        code, output = runner.run_container(workdir, outdir, period=period, uid=int(miner.uid))
+        code, output = runner.run_container(workdir, outdir, period=period, uid=miner.uid)
         bt.logging.info(f"run finished entry={miner.entry_id or miner.uid} exit={code}")
         try:
             with open(outdir / "result.json", "r", encoding="utf-8") as f:
@@ -513,9 +519,10 @@ async def main() -> int:
                     if not line:
                         continue
                     rec = json.loads(line)
-                    uid = int(rec["uid"]) if rec.get("uid") is not None else None
-                    if uid is None or uid < 0:
-                        continue  # skip benchmark lines
+                    # Exclude benchmarks by kind, not by absence of a uid: a
+                    # credit-mode entrant has no uid and is a real competitor.
+                    if rec.get("kind") == "benchmark":
+                        continue
                     eid = rec.get("entry_id")
                     if not eid:
                         continue
@@ -524,7 +531,7 @@ async def main() -> int:
                         "molecules": rec.get("result", {}).get("molecules", []),
                         "github_data": None,
                         "hotkey": rec.get("hotkey"),
-                        "uid": uid,
+                        "uid": rec.get("uid"),
                         "coldkey": rec.get("coldkey"),
                         "submission_name": rec.get("submission_name"),
                         "snapshot_epoch": int(snapshot_epoch_val) if snapshot_epoch_val is not None else period,
