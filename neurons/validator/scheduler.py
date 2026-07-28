@@ -130,9 +130,12 @@ def run_competition(immediate_exit_requested: dict, current_proc: dict, extra_ar
     return rc
 
 
-def setup_and_check_registration():
+def setup_and_check_registration(skip_weights: bool = False):
     cfg = get_config()
     setup_logging(cfg)
+    if skip_weights:
+        bt.logging.info("skip_weights: skipping hotkey registration/stake check")
+        return cfg
 
     async def _check_reg():
         subtensor = bt.AsyncSubtensor(network=cfg.network)
@@ -147,9 +150,10 @@ def setup_and_check_registration():
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validator scheduler")
     parser.add_argument("--test_mode", action="store_true", help="Trigger first run quickly for debugging")
+    parser.add_argument("--skip_weights", action="store_true", help="Skip set_weights loop and hotkey registration/stake check")
     args, unknown = parser.parse_known_args()
     # one-time setup and registration check
-    cfg = setup_and_check_registration()
+    cfg = setup_and_check_registration(skip_weights=args.skip_weights)
 
     # graceful shutdown flags
     termination_requested = {"flag": False}  # graceful: SIGTERM (Watchtower)
@@ -159,8 +163,11 @@ def main() -> None:
 
     # background weights thread
     stop_event = threading.Event()
-    weights_thread = threading.Thread(target=_weights_loop, args=(stop_event, cfg), name="weights", daemon=True)
-    weights_thread.start()
+    if args.skip_weights:
+        bt.logging.info("skip_weights: weights loop not started")
+    else:
+        weights_thread = threading.Thread(target=_weights_loop, args=(stop_event, cfg), name="weights", daemon=True)
+        weights_thread.start()
 
     def _handle_term(signum, frame):
         termination_requested["flag"] = True
