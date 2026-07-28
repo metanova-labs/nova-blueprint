@@ -33,7 +33,7 @@ run:
   # Absolute score margin a challenger must clear to beat the champion.
   improvement_margin: 0.04
   # If set, this UID receives the configured override share of weights.
-  emission_target_override_uid: 54
+  emission_target_override_uid: 56
   # Fraction of non-burn weights to route to the override UID
   emission_target_override_share: 1.0
 

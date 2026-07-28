@@ -152,8 +152,9 @@ def main() -> None:
     parser.add_argument("--test_mode", action="store_true", help="Trigger first run quickly for debugging")
     parser.add_argument("--skip_weights", action="store_true", help="Skip set_weights loop and hotkey registration/stake check")
     args, unknown = parser.parse_known_args()
+    skip_weights = args.skip_weights or os.getenv("SKIP_WEIGHTS") == "true"
     # one-time setup and registration check
-    cfg = setup_and_check_registration(skip_weights=args.skip_weights)
+    cfg = setup_and_check_registration(skip_weights=skip_weights)
 
     # graceful shutdown flags
     termination_requested = {"flag": False}  # graceful: SIGTERM (Watchtower)
@@ -163,7 +164,7 @@ def main() -> None:
 
     # background weights thread
     stop_event = threading.Event()
-    if args.skip_weights:
+    if skip_weights:
         bt.logging.info("skip_weights: weights loop not started")
     else:
         weights_thread = threading.Thread(target=_weights_loop, args=(stop_event, cfg), name="weights", daemon=True)
