@@ -5,6 +5,10 @@ A frozen champion is re-run every epoch. A frozen challenger must beat the
 current champion by `improvement_margin` for `wins_required` consecutive epochs
 (single elimination) to be promoted. A live entrant that beats the champion is
 admitted as a challenger with wins=1 (its qualifying beat is win #1).
+
+When zero challengers clear the threshold, challengers that still scored strictly
+above the champion are soft-kept (retained with wins unchanged) rather than
+eliminated; anyone at or below the champion is still eliminated.
 """
 
 import datetime as dt
@@ -135,8 +139,12 @@ def apply_contest_transition(
     Rules:
     - Cold start (no champion): crown the top finite scorer.
     - Champion infra-failure (no finite score): freeze transitions, keep state.
-    - Each challenger beating champion by margin: wins += 1; failing: eliminated;
-      infra-failing (no result): skipped, wins kept.
+    - Each challenger beating champion by margin: wins += 1.
+      Infra-failing (no result): skipped, wins kept.
+      If at least one challenger clears the threshold, all others below it are
+      eliminated. If zero clear the threshold, challengers scoring strictly above
+      the champion are soft-kept (wins unchanged); those at/below champion are
+      eliminated.
     - A challenger reaching wins_required is promoted (ties broken by best average score across winning epochs);
       surviving challengers reset to wins=0; old champion dropped; no admission.
     - Otherwise admit entrants beating champion by margin as challengers wins=1.
@@ -166,9 +174,16 @@ def apply_contest_transition(
         return state, champ_eid, None
 
     threshold = champ_score + margin
+    challengers = list(state.get("challengers", []))
+    any_cleared_threshold = False
+    for challenger in challengers:
+        cscore = _finite_score(score_dict, _member_entry_id(challenger))
+        if cscore is not None and cscore >= threshold:
+            any_cleared_threshold = True
+            break
 
     survivors: list = []
-    for challenger in state.get("challengers", []):
+    for challenger in challengers:
         ceid = _member_entry_id(challenger)
         cscore = _finite_score(score_dict, ceid)
         if cscore is None:
@@ -179,6 +194,9 @@ def apply_contest_transition(
             advanced["wins"] = int(challenger.get("wins", 0)) + 1
             advanced["score_sum"] = float(challenger.get("score_sum", 0.0)) + cscore
             survivors.append(advanced)
+        elif not any_cleared_threshold and cscore > champ_score:
+            # Soft-keep: above champion but below margin; retain without a win.
+            survivors.append(dict(challenger))
         # else: loss -> eliminated (dropped)
 
     ready = [m for m in survivors if int(m.get("wins", 0)) >= wins_required]
