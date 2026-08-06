@@ -100,8 +100,8 @@ print(result.status_code, result.ok, result.request_id, result.body)
 ```
 
 Notes:
-- Submissions must be signed by a hotkey that is registered on subnet 68 (this wallet will receive emissions if your submission wins).
-- One active submission slot exists per UID per epoch; re-submitting in the same epoch overwrites the previous code upload.
+- Submissions must be signed by a hotkey that owns the submission (its coldkey receives emissions if you win). One active slot per hotkey per epoch; re-submitting with the same hotkey in the same epoch overwrites the previous code upload with no fee.
+- Submission eligibility and instructions depend on the live submission mode; check `GET /quote?hotkey=<ss58>` and https://submission-api.metanova-labs.ai/docs
 ---
 
 
