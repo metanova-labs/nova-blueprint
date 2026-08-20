@@ -49,28 +49,23 @@ def get_smiles(product_name):
 
 def get_heavy_atom_count(smiles: str) -> int:
     """
-    Calculate the number of heavy atoms in a molecule from its SMILES string.
+    Number of heavy atoms (atomic number > 1) in a SMILES string.
+
+    Uses RDKit so aromatic lowercase atoms, bracketed elements, and Cl/Br
+    match ``Mol.GetNumHeavyAtoms()``. Returns 0 if SMILES is empty or
+    unparseable.
     """
-    count = 0
-    i = 0
-    while i < len(smiles):
-        c = smiles[i]
-        
-        if c.isalpha() and c.isupper():
-            elem_symbol = c
-            
-            # If the next character is a lowercase letter, include it (e.g., 'Cl', 'Br')
-            if i + 1 < len(smiles) and smiles[i + 1].islower():
-                elem_symbol += smiles[i + 1]
-                i += 1 
-            
-            # If it's not 'H', count it as a heavy atom
-            if elem_symbol != 'H':
-                count += 1
-        
-        i += 1
-    
-    return count
+    if not smiles:
+        return 0
+    mol = Chem.MolFromSmiles(smiles)
+    return get_heavy_atom_count_from_mol(mol)
+
+
+def get_heavy_atom_count_from_mol(mol) -> int:
+    """Heavy-atom count from an already-parsed RDKit mol. 0 if mol is None."""
+    if mol is None:
+        return 0
+    return mol.GetNumHeavyAtoms()
 
 
 def compute_maccs_entropy(smiles_list: list[str]) -> float:

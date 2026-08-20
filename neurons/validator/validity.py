@@ -4,7 +4,7 @@ from rdkit.Chem import Descriptors
 
 from utils.molecules import (
     get_smiles,
-    get_heavy_atom_count,
+    get_heavy_atom_count_from_mol,
     compute_maccs_entropy,
     find_chemically_identical,
     find_too_similar_pairs,
@@ -80,14 +80,18 @@ def validate_molecules_and_calculate_entropy(
                     valid_names = []
                     break
                 
-                if get_heavy_atom_count(smiles) < config['min_heavy_atoms']:
-                    bt.logging.warning(f"UID={uid}, molecule='{molecule}' has insufficient heavy atoms")
-                    valid_smiles = []
-                    valid_names = []
-                    break
-
                 try:
                     mol = Chem.MolFromSmiles(smiles)
+                    if mol is None:
+                        bt.logging.error(f"Molecule is not parseable by RDKit for UID={uid}, molecule='{molecule}'")
+                        valid_smiles = []
+                        valid_names = []
+                        break
+                    if get_heavy_atom_count_from_mol(mol) < config['min_heavy_atoms']:
+                        bt.logging.warning(f"UID={uid}, molecule='{molecule}' has insufficient heavy atoms")
+                        valid_smiles = []
+                        valid_names = []
+                        break
                     num_rotatable_bonds = Descriptors.NumRotatableBonds(mol)
                     if num_rotatable_bonds < config['min_rotatable_bonds'] or num_rotatable_bonds > config['max_rotatable_bonds']:
                         bt.logging.warning(f"UID={uid}, molecule='{molecule}' has an invalid number of rotatable bonds")
@@ -199,11 +203,12 @@ def validate_molecules_sampler(
             if not smiles:
                 continue
             
-            if get_heavy_atom_count(smiles) < config['min_heavy_atoms']:
-                continue
-
-            try:    
+            try:
                 mol = Chem.MolFromSmiles(smiles)
+                if mol is None:
+                    continue
+                if get_heavy_atom_count_from_mol(mol) < config['min_heavy_atoms']:
+                    continue
                 num_rotatable_bonds = Descriptors.NumRotatableBonds(mol)
                 if num_rotatable_bonds < config['min_rotatable_bonds'] or num_rotatable_bonds > config['max_rotatable_bonds']:
                     continue
