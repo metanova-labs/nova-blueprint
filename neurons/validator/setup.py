@@ -21,6 +21,11 @@ def get_config():
     
     parser.add_argument('--test_mode', action='store_true', 
                        help='Run test validator without setting weights')
+    parser.add_argument(
+        '--contest_state_only',
+        action='store_true',
+        help='Ignored here; consumed by scheduler on first cycle only',
+    )
 
     config = bt.Config(parser)
 

@@ -13,6 +13,21 @@ from config.config_loader import load_config
 from neurons.validator.setup import get_config, setup_logging, check_registration
 from neurons.validator.weights import apply_weights
 
+# Survives Watchtower: volume-backed latch so --test_mode / --contest_state_only
+# fire once even if they stay on the container command.
+_FIRST_CYCLE_STAMP = Path("/data/results/.first_cycle_done")
+
+
+def _consume_first_cycle(test_mode: bool, contest_state_only: bool) -> tuple[bool, bool]:
+    if not (test_mode or contest_state_only):
+        return False, False
+    if _FIRST_CYCLE_STAMP.exists():
+        bt.logging.info("first-cycle flags already consumed; running aligned with API")
+        return False, False
+    _FIRST_CYCLE_STAMP.parent.mkdir(parents=True, exist_ok=True)
+    _FIRST_CYCLE_STAMP.touch()
+    return test_mode, contest_state_only
+
 
 def _get_interval_seconds() -> int:
     cfg = load_config()
@@ -149,7 +164,12 @@ def setup_and_check_registration(skip_weights: bool = False):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validator scheduler")
-    parser.add_argument("--test_mode", action="store_true", help="Trigger first run quickly for debugging")
+    parser.add_argument("--test_mode", action="store_true", help="First cycle only: run in 10s instead of waiting for alignment")
+    parser.add_argument(
+        "--contest_state_only",
+        action="store_true",
+        help="First cycle only: do not pull the submission API; run contest_state.json only",
+    )
     parser.add_argument("--skip_weights", action="store_true", help="Skip set_weights loop and hotkey registration/stake check")
     args, unknown = parser.parse_known_args()
     skip_weights = args.skip_weights or os.getenv("SKIP_WEIGHTS") == "true"
@@ -191,8 +211,9 @@ def main() -> None:
 
     interval = _get_interval_seconds()
     bt.logging.info(f"scheduler started (interval={interval}s)")
-    # Test mode: one-time initial delay to trigger first run quickly for debugging
-    _first_cycle = bool(args.test_mode)
+    _first_cycle, _contest_state_only_once = _consume_first_cycle(
+        args.test_mode, args.contest_state_only
+    )
     _initial_delay_seconds = 10
     while True:
         now_ts = time.time()
@@ -228,8 +249,13 @@ def main() -> None:
 
         bt.logging.info("running competition…")
         is_running["flag"] = True
+        extra = list(unknown)
+        if _contest_state_only_once:
+            extra.append("--contest_state_only")
+            _contest_state_only_once = False
+            bt.logging.info("contest_state_only: this cycle uses contest_state.json only")
         try:
-            run_competition(immediate_exit_requested, current_proc, extra_args=unknown)
+            run_competition(immediate_exit_requested, current_proc, extra_args=extra)
         finally:
             is_running["flag"] = False
         if termination_requested["flag"] or immediate_exit_requested["flag"]:

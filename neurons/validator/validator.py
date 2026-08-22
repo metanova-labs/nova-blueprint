@@ -1,3 +1,4 @@
+import argparse
 import datetime as dt
 import json
 import os
@@ -456,8 +457,15 @@ async def main() -> int:
         f"interval_seconds={interval_seconds}"
     )
 
-    miners = fetch_submission_miners(period=period)
-    bt.logging.info(f"current_block={current_block} submission_api_miners={len(miners)} period={period}")
+    _argv = argparse.ArgumentParser(add_help=False)
+    _argv.add_argument("--contest_state_only", action="store_true")
+    _run_args, _ = _argv.parse_known_args()
+    if _run_args.contest_state_only:
+        miners = []
+        bt.logging.info("contest_state_only: skipping submission API; run list from contest_state.json")
+    else:
+        miners = fetch_submission_miners(period=period)
+        bt.logging.info(f"current_block={current_block} submission_api_miners={len(miners)} period={period}")
 
     block_hash, subtensor = await call_st(subtensor, network, lambda st: st.determine_block_hash(current_block), timeout_s=10)
     challenge_params = build_challenge_params(str(block_hash))
