@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 from sandbox import runner
 from utils.challenge_params import build_challenge_params
+from sandbox.broker import register_proteins
 from neurons.validator import scoring as scoring_module
 from neurons.validator.code_archive import (
     download_and_extract_snapshot,
@@ -343,7 +344,7 @@ def run_job(
     try:
         # One token names the workdir, the container and the log stream, so a single
         # run is greppable across disk, docker and loki.
-        entry_token = miner.entry_id or f"benchmark_{miner.uid}"
+        entry_token = miner.entry_id or miner.submission_name or f"benchmark_{miner.uid}"
         dest = work_root / f"{period}_{_safe_path_token(entry_token)}"
 
         if miner.kind == "benchmark":
@@ -469,6 +470,13 @@ async def main() -> int:
 
     block_hash, subtensor = await call_st(subtensor, network, lambda st: st.determine_block_hash(current_block), timeout_s=10)
     challenge_params = build_challenge_params(str(block_hash))
+
+    # Once per round, before anyone is on the clock.
+    challenge = challenge_params["challenge"]
+    proteins = register_proteins(challenge["target_sequences"]
+                                 + challenge["antitarget_sequences"])
+    bt.logging.info(f"oracle ready: {len(proteins)} protein(s) for period {period}")
+
     # Persist the exact input used for this period
     try:
         results_dir = Path("/data/results").resolve()
@@ -486,6 +494,7 @@ async def main() -> int:
             submitted_at_utc=now_ts,
             hotkey="benchmark",
             kind="benchmark",
+            submission_name="brute_force",
         )
         bt.logging.info(f"benchmark: running brute_force snapshot (uid={BENCHMARK_UID_RANDOM})")
         run_job(benchmark, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
@@ -498,6 +507,7 @@ async def main() -> int:
             submitted_at_utc=now_ts,
             hotkey="benchmark",
             kind="benchmark",
+            submission_name="thompson_sampling",
         )
         bt.logging.info(f"thompson_sampling: running snapshot (uid={BENCHMARK_UID_THOMPSON})")
         run_job(ts_benchmark, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
