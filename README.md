@@ -3,11 +3,11 @@
 ML‑driven drug discovery on Bittensor.
 NOVA Blueprint powers SN68 by running competitive cycles that explore vast chemical spaces, collect candidate molecules, and iteratively build on the best‑performing approaches.
 
-This codebase implements the SN68 validator scheduler and the sandboxed miner runner: it pulls miner snapshots from the submission API + MinIO archive, generates per‑cycle challenges, executes miners in an isolated Docker sandbox within a fixed time budget, and collects `/output/result.json` for scoring.
+This codebase implements the SN68 validator scheduler and the sandboxed miner runner: it pulls miner snapshots from the submission API + MinIO archive, generates per‑cycle challenges, executes miners in an isolated Docker sandbox within a fixed time budget, and collects `/output/result.json`. Binding affinity is predicted by a Boltz-2 oracle, which both the sandbox and the validator score against.
 
 ### System Requirements (validators)
 - Docker with docker compose plugin
-- NVIDIA RTX 4090 GPU, NVIDIA driver + NVIDIA Container Toolkit installed on host
+- Access to a NOVA oracle endpoint (`ORACLE_URL`, `ORACLE_TOKEN`)
 - Bittensor wallets on host (default: `$HOME/.bittensor/wallets`)
 
 ---
