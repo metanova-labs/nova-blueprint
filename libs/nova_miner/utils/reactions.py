@@ -9,7 +9,7 @@ def get_total_reactions() -> int:
     """Query database for total number of reactions, add 1 for savi option."""
     try:
         db_path = os.path.join(os.path.dirname(__file__), "../combinatorial_db/molecules.sqlite")
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM reactions")
         count = cursor.fetchone()[0]
