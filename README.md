@@ -60,6 +60,8 @@ Must‑haves:
 - Read input from `/workspace/input.json`
 - Write output to `/output/result.json` with exactly `num_molecules` reaction‑formatted molecules (`rxn:*`)
 
+**Rules**: everything your submission runs must be present as readable source, and the molecules must be generated inside the sandbox. Precomputed results, seeded molecule lists, and compiled artifacts are ineligible. If your approach needs something the sandbox does not provide, contact the NOVA team.
+
 Minimal example `result.json`:
 ```json
 {
