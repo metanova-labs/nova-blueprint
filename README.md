@@ -53,7 +53,7 @@ Notes:
 ## For Miners 
 
 Your miner repo is cloned and executed in a Docker sandbox (no network, read‑only root; use `/tmp`).
-Available: `rdkit`, `pandas`, `numpy`, `tqdm`, `nova_miner`.
+Available: `rdkit`, `pandas`, `numpy`, `scikit-learn`, `scipy`, `tqdm`, `nova_miner`.
 
 Must‑haves:
 - `miner.py` at repo root is run as `python /workspace/miner.py`
