@@ -1,5 +1,5 @@
-"""Serves a unix socket for one sandbox run, stamping caller identity onto
-each request and forwarding it to the oracle."""
+"""Oracle access for the validator, and a unix socket for one sandbox run that
+stamps caller identity onto each request before forwarding it."""
 from __future__ import annotations
 
 import http.client
@@ -17,6 +17,11 @@ ORACLE_TOKEN = os.environ.get("ORACLE_TOKEN", "")
 
 TIMEOUT_S = 900
 REGISTER_TIMEOUT_S = 1800   # a new target needs an alignment search
+
+# The oracle spreads a request across its shards and waits for the slowest, so a
+# request costs ceil(predictions / shards) rounds. 480 is a whole number of
+# rounds at 24 shards and stays under the server's 512 cap.
+MAX_PREDICTIONS = 480
 
 
 def _post(path: str, body: dict, timeout: float) -> tuple[int, bytes]:
@@ -44,6 +49,19 @@ def register_proteins(sequences: list[str],
     if status != 200:
         raise RuntimeError(f"oracle refused proteins ({status}): {payload[:200]!r}")
     return json.loads(payload)["proteins"]
+
+
+def score(targets: list[str], smiles: list[str], epoch: str) -> list[dict]:
+    """Score molecules against targets, attributed to the validator itself.
+
+    results[i]["scores"][t] is smiles[i] against targets[t], or None.
+    """
+    status, payload = _post("/v1/score", {
+        "miner": "validator", "epoch": epoch,
+        "targets": list(targets), "smiles": list(smiles)}, TIMEOUT_S)
+    if status != 200:
+        raise RuntimeError(f"oracle refused score ({status}): {payload[:200]!r}")
+    return json.loads(payload)["results"]
 
 
 class _Handler(BaseHTTPRequestHandler):
