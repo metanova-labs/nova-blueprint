@@ -20,7 +20,7 @@ import validator.scoring as scoring_module
 from random_sampler import run_sampler
 from combinatorial_db.reactions import get_smiles_from_reaction
 
-#DB_PATH = str(Path(nova_ph2.__file__).resolve().parent / "combinatorial_db" / "molecules.sqlite")
+#DB_PATH = str(Path(nova_miner.__file__).resolve().parent / "combinatorial_db" / "molecules.sqlite")
 DB_PATH = str(Path(PARENT_DIR).resolve().parent / "combinatorial_db" / "molecules.sqlite")
 
 def get_config(input_file: os.path = os.path.join(PARENT_DIR, "..", "input.json")):

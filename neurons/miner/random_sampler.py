@@ -68,7 +68,7 @@ def compute_product_smiles(
             r1, r2, r3 = v
         except Exception:
             return None
-        # Cascade logic aligned with nova_ph2.reactions.react_three_components
+        # Cascade logic aligned with nova_miner.reactions.react_three_components
         if rxn_id == 3:
             triazole_cooh = combine_triazole_synthons(r1, r2)
             if not triazole_cooh:
