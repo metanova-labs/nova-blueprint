@@ -58,7 +58,8 @@ def calculate_final_scores(
             if any(score == -math.inf for score in antitarget_scores_for_mol):
                 combined_molecule_scores.append(-math.inf)
                 continue
-            avg_antitarget = sum(antitarget_scores_for_mol) / len(antitarget_scores_for_mol)
+            avg_antitarget = (sum(antitarget_scores_for_mol) / len(antitarget_scores_for_mol)
+                              if antitarget_scores_for_mol else 0.0)
 
             # Calculate score after target/antitarget combination
             mol_score = avg_target - (config['antitarget_weight'] * avg_antitarget)

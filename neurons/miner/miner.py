@@ -127,7 +127,8 @@ def calculate_final_scores(score_dict: dict,
 
         # antitarget average
         antitarget_scores_for_mol = [antitarget_list[mol_idx] for antitarget_list in antitargets]
-        avg_antitarget = sum(antitarget_scores_for_mol) / len(antitarget_scores_for_mol)
+        avg_antitarget = (sum(antitarget_scores_for_mol) / len(antitarget_scores_for_mol)
+                          if antitarget_scores_for_mol else 0.0)
 
         # final score
         score = avg_target - (config["antitarget_weight"] * avg_antitarget)
