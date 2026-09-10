@@ -53,11 +53,12 @@ Notes:
 ## For Miners 
 
 Your miner repo is cloned and executed in a Docker sandbox (no network, read‑only root; use `/tmp`).
+Available: `rdkit`, `pandas`, `numpy`, `tqdm`, `nova_miner`.
 
 Must‑haves:
 - `miner.py` at repo root is run as `python /workspace/miner.py`
 - Read input from `/workspace/input.json`
-- Write output to `/output/result.json` with reaction‑formatted molecules only (`rxn:*`)
+- Write output to `/output/result.json` with exactly `num_molecules` reaction‑formatted molecules (`rxn:*`)
 
 Minimal example `result.json`:
 ```json
@@ -66,10 +67,24 @@ Minimal example `result.json`:
 }
 ```
 
+**Scoring**: binding affinity comes from the oracle, reached over the unix socket at `$ORACLE_SOCKET`. One request covers every (molecule, target) pair.
+
+```python
+import os
+from nova_miner.utils.oracle import Oracle, combine
+from nova_miner.utils.molecules import get_heavy_atom_count
+
+oracle = Oracle(os.environ["ORACLE_SOCKET"])
+rows = oracle.score(targets=target_sequences, smiles=["CCO"])
+score = combine(rows[0]["scores"][0], get_heavy_atom_count("CCO"))
+```
+
+`combine` reduces the Boltz-2 metrics to the number you are ranked by; higher is better, `-inf` where no prediction was returned. Requests are spread across the oracle's 24 shards, so twenty-four pairs cost about as much as one — batch widely. `neurons/miner/` is an example.
+
 **Note - Combinatorial SQLite DB**: open the provided database in read‑only mode to avoid write errors on a read‑only filesystem. Example: `sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)`.
 
 Timing: You have a fixed time budget to generate the highest‑scoring set of molecules, at timeout molecules are collected to be scored against other submissions.  
-Where it’s defined: `config/config.yaml` → `run.time_budget_sec` (default 1800s).  
+Where it’s defined: `config/config.yaml` → `run.time_budget_sec` (default 3600s).  
 Recommendation: keep `/output/result.json` up‑to‑date during the run so the latest results are captured when the sandbox exits.
 
 ---
