@@ -3,7 +3,6 @@ requests>=2.32.4
 bittensor==9.9.0
 substrate-interface==1.7.11
 datasets==3.3.2
-huggingface-hub==0.29.1
 pandas==2.2.3
 rdkit==2024.9.4
 psycopg2-binary==2.9.9

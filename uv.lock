@@ -709,7 +709,6 @@ source = { virtual = "." }
 dependencies = [
     { name = "bittensor" },
     { name = "datasets" },
-    { name = "huggingface-hub" },
     { name = "minio" },
     { name = "pandas" },
     { name = "psycopg2-binary" },
@@ -722,7 +721,6 @@ dependencies = [
 requires-dist = [
     { name = "bittensor", specifier = "==10.5.0" },
     { name = "datasets", specifier = "==3.3.2" },
-    { name = "huggingface-hub", specifier = "==0.29.1" },
     { name = "minio", specifier = "==7.2.3" },
     { name = "pandas", specifier = "==2.2.3" },
     { name = "psycopg2-binary", specifier = "==2.9.9" },

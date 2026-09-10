@@ -1,52 +1,29 @@
 import os
 import sys
-import requests
 import math
-import time
 
 PARENT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(PARENT_DIR)
 
 import numpy as np
-import pandas as pd
 from rdkit import Chem
 from rdkit.Chem import MACCSkeys
 from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
 from rdkit.DataStructs import BulkTanimotoSimilarity
-from huggingface_hub import hf_hub_download, hf_hub_url, get_hf_file_metadata
-from huggingface_hub.errors import EntryNotFoundError
 import bittensor as bt
 from combinatorial_db.reactions import get_smiles_from_reaction
-from dotenv import load_dotenv
 
 
-load_dotenv(override=True)
-
-
-def get_smiles(product_name):
-    # Remove single and double quotes from product_name if they exist
-    if product_name:
-        product_name = product_name.replace("'", "").replace('"', "")
-    else:
+def get_smiles(product_name: str) -> str | None:
+    """SMILES for a combinatorial molecule name, e.g. ``rxn:1:45499:31805``."""
+    if not product_name:
         bt.logging.error("Product name is empty.")
         return None
-
-    if product_name.startswith("rxn:"):
-        return get_smiles_from_reaction(product_name)
-
-    api_key = os.environ.get("VALIDATOR_API_KEY")
-    if not api_key:
-        raise ValueError("validator_api_key environment variable not set.")
-
-    url = f"https://8vzqr9wt22.execute-api.us-east-1.amazonaws.com/dev/smiles/{product_name}"
-
-    headers = {"x-api-key": api_key}
-    
-    response = requests.get(url, headers=headers)
-
-    data = response.json()
-
-    return data.get("smiles")
+    product_name = product_name.replace("'", "").replace('"', "")
+    if not product_name.startswith("rxn:"):
+        bt.logging.error(f"Not a combinatorial molecule name: {product_name}")
+        return None
+    return get_smiles_from_reaction(product_name)
 
 
 def get_heavy_atom_count(smiles: str) -> int:
