@@ -59,6 +59,9 @@ def _detail(payload: bytes) -> str:
         return payload.decode(errors="replace")[:200]
 
 
+FORMULA = "(affinity_probability_binary - affinity_pred_value) / heavy_atom_count"
+
+
 def combine(scores: dict | None, heavy_atom_count: int) -> float:
     """One number per (molecule, target), higher is better.
 

@@ -42,23 +42,52 @@ def _json_float(value):
     return out
 
 
-def _build_entry_molecules(valid_entry: dict | None, scores: dict) -> list[dict]:
-    """Pre-zip per-molecule scores into the backend's Molecule shape."""
+def _build_entry_molecules(
+    valid_entry: dict | None,
+    scores: dict,
+    target_proteins: list[str],
+    antitarget_proteins: list[str],
+) -> list[dict]:
+    """Pre-zip per-molecule scores into the backend's Molecule shape.
+
+    Each molecule carries one entry per protein saying which protein it was, in
+    which role, the combined value, and the raw metrics behind it."""
     names = (valid_entry or {}).get("names", []) or []
     smiles = (valid_entry or {}).get("smiles", []) or []
-    targets = scores.get("ps_target_scores", []) or []
-    antitargets = scores.get("ps_antitarget_scores", []) or []
-    combined = scores.get("ps_combined_molecule_scores", []) or []
+    combined = scores.get("combined_molecule_scores", []) or []
+
+    columns = []
+    for role, proteins, value_key, metric_key in (
+        ("target", target_proteins, "target_scores", "target_metrics"),
+        ("antitarget", antitarget_proteins, "antitarget_scores", "antitarget_metrics"),
+    ):
+        values = scores.get(value_key, []) or []
+        metrics = scores.get(metric_key, []) or []
+        for i, protein in enumerate(proteins):
+            columns.append((
+                protein, role,
+                values[i] if i < len(values) else [],
+                metrics[i] if i < len(metrics) else [],
+            ))
 
     molecules = []
     for j in range(min(len(names), len(smiles))):
+        per_protein = [
+            {
+                "protein": str(protein),
+                "role": role,
+                "value": _json_float(value_col[j]),
+                "metrics": metric_col[j] if j < len(metric_col) else None,
+            }
+            for protein, role, value_col, metric_col in columns
+            if j < len(value_col)
+        ]
         molecules.append(
             {
                 "name": str(names[j]),
                 "smiles": str(smiles[j]),
-                "ps_target_scores": [_json_float(col[j]) for col in targets if j < len(col)],
-                "ps_antitarget_scores": [_json_float(col[j]) for col in antitargets if j < len(col)],
-                "ps_final_score": _json_float(combined[j]) if j < len(combined) else None,
+                "final_score": _json_float(combined[j]) if j < len(combined) else None,
+                "scores": per_protein,
             }
         )
     return molecules
@@ -75,6 +104,8 @@ async def submit_epoch_results(
     state: dict,
     scored_sample_path: str = os.path.join(BASE_DIR, "all_scores_0.json"),
     benchmarks: list[dict] | None = None,
+    scoring_model: str | None = None,
+    scoring_formula: str | None = None,
 ) -> bool:
     """Submit one epoch of results to the backend as an entries[] payload."""
     try:
@@ -121,8 +152,10 @@ async def submit_epoch_results(
                     "submission_name": entry.get("submission_name"),
                     "github_data": entry.get("github_data"),
                     "entropy": _json_float(scores.get("entropy")),
-                    "ps_final_score": _json_float(scores.get("ps_final_score")),
-                    "molecules": _build_entry_molecules(valid_molecules_by_entry.get(eid), scores),
+                    "final_score": _json_float(scores.get("final_score")),
+                    "molecules": _build_entry_molecules(
+                        valid_molecules_by_entry.get(eid), scores,
+                        target_proteins, antitarget_proteins),
                 }
             )
 
@@ -132,6 +165,8 @@ async def submit_epoch_results(
             "epoch": epoch_number,
             "target_proteins": target_proteins,
             "antitarget_proteins": antitarget_proteins,
+            "scoring_model": scoring_model,
+            "scoring_formula": scoring_formula,
             "config": {
                 "antitarget_weight": config.get("antitarget_weight", 1.0),
                 "min_rotatable_bonds": config.get("min_rotatable_bonds", 0),

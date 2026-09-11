@@ -48,7 +48,7 @@ def _finite_score(score_dict: dict, eid: str) -> Optional[float]:
     data = score_dict.get(eid)
     if not data:
         return None
-    raw = data.get("ps_final_score")
+    raw = data.get("final_score")
     try:
         value = float(raw)
     except (TypeError, ValueError):

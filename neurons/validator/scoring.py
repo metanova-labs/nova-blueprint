@@ -16,12 +16,14 @@ if NOVA_DIR not in sys.path:
 LIBS_DIR = os.path.join(NOVA_DIR, "libs")
 if LIBS_DIR not in sys.path:
     sys.path.append(LIBS_DIR)
-from nova_miner.utils.oracle import combine
+from nova_miner.utils.oracle import FORMULA, combine
 
 from utils.proteins import get_code_from_protein_sequence
 from utils.molecules import get_heavy_atom_count
 from neurons.validator.validity import validate_molecules_and_calculate_entropy
 from sandbox.broker import score as oracle_score, MAX_PREDICTIONS
+
+SCORING_MODEL = "boltz2"
 from neurons.validator.ranking import calculate_final_scores
 from neurons.validator.contest import apply_contest_transition
 from neurons.validator.save_data import submit_epoch_results
@@ -74,8 +76,10 @@ def _build_thompson_benchmark_payload(
         bench_uid_to_data = {uid: {"molecules": molecules, "raw": github_data}}
         bench_score_dict = {
             uid: {
-                "ps_target_scores": [[] for _ in range(len(config.get("target_codes", [])))],
-                "ps_antitarget_scores": [[] for _ in range(len(config.get("antitarget_codes", [])))],
+                "target_scores": [[] for _ in range(len(config.get("target_codes", [])))],
+                "antitarget_scores": [[] for _ in range(len(config.get("antitarget_codes", [])))],
+                "target_metrics": [[] for _ in range(len(config.get("target_codes", [])))],
+                "antitarget_metrics": [[] for _ in range(len(config.get("antitarget_codes", [])))],
                 "entropy": None,
                 "github_data": github_data,
             }
@@ -103,7 +107,7 @@ def _build_thompson_benchmark_payload(
         )
 
         names = bench_valid[uid].get("names", [])
-        combined = bench_score_dict.get(uid, {}).get("ps_combined_molecule_scores", [])
+        combined = bench_score_dict.get(uid, {}).get("combined_molecule_scores", [])
         n = min(len(names), len(combined))
         scored_molecules = [[str(names[j]), float(combined[j])] for j in range(n)]
         if not scored_molecules:
@@ -153,8 +157,10 @@ async def process_epoch(
         # Initialize scoring structure
         score_dict = {
             eid: {
-                "ps_target_scores": [[] for _ in range(len(target_codes))],
-                "ps_antitarget_scores": [[] for _ in range(len(antitarget_codes))],
+                "target_scores": [[] for _ in range(len(target_codes))],
+                "antitarget_scores": [[] for _ in range(len(antitarget_codes))],
+                "target_metrics": [[] for _ in range(len(target_codes))],
+                "antitarget_metrics": [[] for _ in range(len(antitarget_codes))],
                 "entropy": None,
                 "github_data": entries[eid].get("github_data"),
             }
@@ -213,6 +219,8 @@ async def process_epoch(
                     epoch_number=epoch_number,
                     target_proteins=target_codes,
                     antitarget_proteins=antitarget_codes,
+                    scoring_model=SCORING_MODEL,
+                    scoring_formula=FORMULA,
                     entries=entries,
                     valid_molecules_by_entry=valid_molecules_by_entry,
                     score_dict=score_dict,
@@ -242,8 +250,9 @@ def score_all_proteins_oracle(
     """Score every valid molecule against every protein and fill score_dict.
 
     One oracle request covers all proteins for a chunk of molecules, and a molecule
-    submitted by several entries is predicted once. Anything the oracle could not
-    score is -inf, which ranking.py already treats as a failed molecule.
+    submitted by several entries is predicted once. Alongside the combined value
+    each prediction's raw metrics are kept, so the score stays reproducible.
+    Anything the oracle could not score is -inf, which ranking.py treats as failed.
     """
     all_proteins = target_proteins + antitarget_proteins
     if not all_proteins:
@@ -254,9 +263,11 @@ def score_all_proteins_oracle(
         if uid_to_data:
             n = len(uid_to_data.get(uid, {}).get("molecules", []))
         for col in range(len(target_proteins)):
-            score_dict[uid]["ps_target_scores"][col] = [-math.inf] * n
+            score_dict[uid]["target_scores"][col] = [-math.inf] * n
+            score_dict[uid]["target_metrics"][col] = [None] * n
         for col in range(len(antitarget_proteins)):
-            score_dict[uid]["ps_antitarget_scores"][col] = [-math.inf] * n
+            score_dict[uid]["antitarget_scores"][col] = [-math.inf] * n
+            score_dict[uid]["antitarget_metrics"][col] = [None] * n
         return n
 
     unique: dict[str, None] = {}
@@ -272,8 +283,10 @@ def score_all_proteins_oracle(
         bt.logging.warning("No valid molecules to score this epoch.")
         return
 
-    failed = [-math.inf] * len(all_proteins)
-    scores: dict[str, list[float]] = {}
+    failed_values = [-math.inf] * len(all_proteins)
+    failed_metrics = [None] * len(all_proteins)
+    values: dict[str, list[float]] = {}
+    metrics: dict[str, list[dict | None]] = {}
     smiles_list = list(unique)
     per_request = max(1, MAX_PREDICTIONS // len(all_proteins))
 
@@ -284,22 +297,28 @@ def score_all_proteins_oracle(
         except Exception as e:
             bt.logging.error(f"Oracle scoring failed for {len(chunk)} molecules: {e}")
             for smiles in chunk:
-                scores[smiles] = failed
+                values[smiles] = failed_values
+                metrics[smiles] = failed_metrics
             continue
         for smiles, row in zip(chunk, rows):
             heavy = get_heavy_atom_count(smiles)
-            scores[smiles] = [combine(m, heavy) for m in row["scores"]]
+            values[smiles] = [combine(m, heavy) for m in row["scores"]]
+            metrics[smiles] = list(row["scores"])
 
     for uid, valid in valid_molecules_by_uid.items():
         smiles_list = valid.get("smiles") or []
         if not smiles_list:
             continue
         for protein_idx in range(len(all_proteins)):
-            column = [scores.get(s, failed)[protein_idx] for s in smiles_list]
+            value_col = [values.get(s, failed_values)[protein_idx] for s in smiles_list]
+            metric_col = [metrics.get(s, failed_metrics)[protein_idx] for s in smiles_list]
             if protein_idx < len(target_proteins):
-                score_dict[uid]["ps_target_scores"][protein_idx] = column
+                score_dict[uid]["target_scores"][protein_idx] = value_col
+                score_dict[uid]["target_metrics"][protein_idx] = metric_col
             else:
-                score_dict[uid]["ps_antitarget_scores"][protein_idx - len(target_proteins)] = column
+                col = protein_idx - len(target_proteins)
+                score_dict[uid]["antitarget_scores"][col] = value_col
+                score_dict[uid]["antitarget_metrics"][col] = metric_col
 
     bt.logging.info(
         f"Scored {len(unique)} unique molecules against {len(all_proteins)} proteins")
