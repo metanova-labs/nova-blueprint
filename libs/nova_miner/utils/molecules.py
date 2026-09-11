@@ -1,27 +1,23 @@
-import os
-import sys
+import logging
 import math
-
-PARENT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.append(PARENT_DIR)
 
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem import MACCSkeys
-from rdkit.Chem.rdFingerprintGenerator import GetMorganGenerator
-from rdkit.DataStructs import BulkTanimotoSimilarity
-import bittensor as bt
-from combinatorial_db.reactions import get_smiles_from_reaction
+
+from ..combinatorial_db.reactions import get_smiles_from_reaction
+
+log = logging.getLogger(__name__)
 
 
 def get_smiles(product_name: str) -> str | None:
     """SMILES for a combinatorial molecule name, e.g. ``rxn:1:45499:31805``."""
     if not product_name:
-        bt.logging.error("Product name is empty.")
+        log.error("Product name is empty.")
         return None
     product_name = product_name.replace("'", "").replace('"', "")
     if not product_name.startswith("rxn:"):
-        bt.logging.error(f"Not a combinatorial molecule name: {product_name}")
+        log.error("Not a combinatorial molecule name: %s", product_name)
         return None
     return get_smiles_from_reaction(product_name)
 
@@ -98,46 +94,8 @@ def find_chemically_identical(smiles_list: list[str]) -> dict:
                     inchikey_to_indices[inchikey] = []
                 inchikey_to_indices[inchikey].append(i)
         except Exception as e:
-            bt.logging.warning(f"Error processing SMILES {smiles}: {e}")
+            log.warning(f"Error processing SMILES {smiles}: {e}")
     
     duplicates = {k: v for k, v in inchikey_to_indices.items() if len(v) > 1}
     
     return duplicates
-
-
-def find_too_similar_pairs(
-    smiles_list: list[str],
-    threshold: float,
-    radius: int = 2,
-    n_bits: int = 2048,
-) -> list[tuple[int, int, float]]:
-    """
-    Return all (i, j, similarity) pairs whose Morgan/ECFP4 Tanimoto similarity
-    is >= ``threshold``. Pairs are reported with i < j.
-
-    A submission is considered diverse iff this returns an empty list. Returning
-    pairs (rather than a bool) lets callers log which molecules collided.
-
-    Set ``threshold`` to 1.0 to effectively disable the check (only exact-FP
-    duplicates would trigger, and those are already caught by the InChIKey check).
-    """
-    if threshold >= 1.0 + 1e-12 or len(smiles_list) < 2:
-        return []
-
-    generator = GetMorganGenerator(radius=radius, fpSize=n_bits)
-    fps = []
-    indices = []
-    for i, smi in enumerate(smiles_list):
-        mol = Chem.MolFromSmiles(smi)
-        if mol is None:
-            continue
-        fps.append(generator.GetFingerprint(mol))
-        indices.append(i)
-
-    offending: list[tuple[int, int, float]] = []
-    for k in range(len(fps) - 1):
-        sims = BulkTanimotoSimilarity(fps[k], fps[k + 1:])
-        for off, s in enumerate(sims):
-            if s >= threshold:
-                offending.append((indices[k], indices[k + 1 + off], float(s)))
-    return offending

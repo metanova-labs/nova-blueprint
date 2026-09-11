@@ -1,20 +1,22 @@
+import logging
 import os
 import sqlite3
-import bittensor as bt
+
+log = logging.getLogger(__name__)
 
 
 def get_total_reactions() -> int:
     """Query database for total number of reactions, add 1 for savi option."""
     try:
-        db_path = os.path.join(os.path.dirname(__file__), "../libs/nova_miner/combinatorial_db/molecules.sqlite")
-        conn = sqlite3.connect(db_path)
+        db_path = os.path.join(os.path.dirname(__file__), "../combinatorial_db/molecules.sqlite")
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM reactions")
         count = cursor.fetchone()[0]
         conn.close()
         return count + 1  # +1 for savi option
     except Exception as e:
-        bt.logging.warning(f"Could not query reaction count: {e}, defaulting to 4")
+        log.warning(f"Could not query reaction count: {e}, defaulting to 4")
         return 4
 
 
@@ -38,10 +40,8 @@ def is_reaction_allowed(molecule: str, allowed_reaction: str = None) -> bool:
                 return allowed_reaction == f"rxn:{rxn_id}"
             return False  # Malformed rxn format
         except Exception as e:
-            bt.logging.warning(f"Error parsing reaction molecule '{molecule}': {e}")
+            log.warning(f"Error parsing reaction molecule '{molecule}': {e}")
             return False
     else:
         # Not in reaction format, only allowed if savi is the allowed reaction
         return allowed_reaction == "savi"
-
-

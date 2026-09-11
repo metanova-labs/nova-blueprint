@@ -8,7 +8,7 @@ from minio.error import S3Error
 import shutil
 
 
-SNAPSHOT_BUCKET = "blueprint-code-archive"
+SNAPSHOT_BUCKET = "blueprint-boltz-code-archive"
 BENCHMARK_OBJECT_KEYS: Dict[str, str] = {
     "brute_force": "benchmarks/brute_force.tar.gz",
     "thompson_sampling": "benchmarks/thompson_sampling.tar.gz",

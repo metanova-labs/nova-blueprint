@@ -1,0 +1,6 @@
+# Miner sandbox image: no network, no GPU.
+pandas==2.2.3
+rdkit==2024.9.4
+scikit-learn==1.6.1
+scipy==1.15.1
+tqdm==4.67.1

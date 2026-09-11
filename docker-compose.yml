@@ -6,7 +6,6 @@ services:
     container_name: nova-blueprint
     restart: "no"
     working_dir: /app
-    gpus: all
     init: true
     stop_grace_period: 24h
     env_file:

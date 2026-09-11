@@ -1,6 +1,6 @@
 # Number of targets and antitargets to select
 protein_selection:
-  num_antitargets: 2
+  num_antitargets: 0
 
 # Parameters for validating and scoring molecules
 molecule_validation:
@@ -25,7 +25,7 @@ reaction_filtering:
   random_valid_reaction: false  # true = one random reaction per epoch, false = all reactions valid
 
 run:
-  time_budget_sec: 900
+  time_budget_sec: 3600
   # One competition every day (UTC-aligned)
   competition_interval_seconds: 86400
   # Consecutive epochs a frozen challenger must beat the champion to be promoted.

@@ -9,6 +9,7 @@ from typing import Tuple, Optional
 import threading
 
 from config.config_loader import load_time_budget_sec  
+from sandbox.broker import Broker
 import bittensor as bt
 
 
@@ -93,6 +94,10 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
     host_uid = os.stat(PROJECT_ROOT).st_uid
     host_gid = os.stat(PROJECT_ROOT).st_gid
 
+    # docker -v is resolved by the host daemon, so pass the host path.
+    sock_path = workdir / "oracle.sock"
+    host_sock = host_workdir / "oracle.sock"
+
     # Docker container names allow only [a-zA-Z0-9][a-zA-Z0-9_.-]; entry_id workdirs
     # contain '@' (hotkey@epoch), so sanitize anything outside that set.
     container_name = re.sub(r"[^a-z0-9_.-]", "-", f"miner-sbx-{workdir.name}".lower())
@@ -113,21 +118,19 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
         "--cap-drop=ALL",
         "--security-opt", "no-new-privileges:true",
         "--tmpfs", "/tmp:rw,noexec,nosuid,nodev",
-        "--gpus", os.environ.get("SANDBOX_GPU", "device=0"),
         "--network=none",
         "--user", f"{host_uid}:{host_gid}",
         "-e", "HOME=/tmp",
         "-e", "XDG_CACHE_HOME=/tmp",
-        "-e", "HF_HOME=/tmp",
-        "-e", "TORCH_HOME=/opt/torch_cache",
-        "-e", "TRANSFORMERS_CACHE=/tmp",
         "-e", "MPLCONFIGDIR=/tmp",
         "-e", "PYTHONDONTWRITEBYTECODE=1",
         "-e", "SQLITE_TMPDIR=/tmp",
         "-e", "WORKDIR=/workspace",
         "-e", "OUTPUT_DIR=/output",
+        "-e", "ORACLE_SOCKET=/run/oracle.sock",
         "-v", f"{host_workdir}:/workspace:ro",
         "-v", f"{host_outdir}:/output:rw",
+        "-v", f"{host_sock}:/run/oracle.sock",
         "--label", "app=nova_blueprint",
         "--label", "role=miner",
         "--label", f"period={period}",
@@ -135,7 +138,8 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
         "--name", container_name,
         SANDBOX_IMAGE_TAG,
     ]
-    with open(outdir / "log.txt", "w", encoding="utf-8") as logf:
+    with Broker(sock_path, miner=entry_id, epoch=str(period)), \
+            open(outdir / "log.txt", "w", encoding="utf-8") as logf:
         logf.write("starting docker\n")
         logf.flush()
         proc = subprocess.Popen(

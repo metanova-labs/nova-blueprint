@@ -6,24 +6,51 @@ import json
 import traceback
 import time
 
-import bittensor as bt
+import logging
 import pandas as pd
 from rdkit import Chem
 from pathlib import Path
+import nova_miner
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__)))
 PARENT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(PARENT_DIR)
 
-from validator.scoring import score_molecules_json
-import validator.scoring as scoring_module
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "/output")
+
+logging.basicConfig(level=logging.INFO, stream=sys.stdout,
+                    format="%(levelname)s %(name)s %(message)s")
+log = logging.getLogger("miner")
+
+from nova_miner.utils.oracle import Oracle, combine
+from nova_miner.utils.molecules import get_heavy_atom_count
 from random_sampler import run_sampler
-from combinatorial_db.reactions import get_smiles_from_reaction
+from nova_miner.combinatorial_db.reactions import get_smiles_from_reaction
 
-#DB_PATH = str(Path(nova_ph2.__file__).resolve().parent / "combinatorial_db" / "molecules.sqlite")
-DB_PATH = str(Path(PARENT_DIR).resolve().parent / "combinatorial_db" / "molecules.sqlite")
+DB_PATH = str(Path(nova_miner.__file__).resolve().parent / "combinatorial_db" / "molecules.sqlite")
 
-def get_config(input_file: os.path = os.path.join(PARENT_DIR, "..", "input.json")):
+ORACLE = Oracle(os.environ["ORACLE_SOCKET"])
+MAX_PREDICTIONS = 480   # per request, counting (molecule, target) pairs.
+# The oracle round-robins a request across its 24 shards and waits for the
+# slowest, so a request costs ceil(predictions / 24) rounds. 480 is a multiple
+# of 24 and under the server's 512 cap, and leaves room for a whole batch in
+# one request so it is not split into a full chunk plus a short one.
+
+
+def score_against_proteins(smiles: list[str], proteins: list[str]) -> list[list[float]]:
+    """-> one combined score per (molecule, protein), molecules in order."""
+    unique = list(dict.fromkeys(smiles))
+    per_request = max(1, MAX_PREDICTIONS // len(proteins))
+    rows = []
+    for start in range(0, len(unique), per_request):
+        rows.extend(ORACLE.score(proteins, unique[start:start + per_request]))
+
+    heavy = {s: get_heavy_atom_count(s) for s in unique}
+    scored = {s: [combine(m, heavy[s]) for m in row["scores"]]
+              for s, row in zip(unique, rows)}
+    return [scored[s] for s in smiles]
+
+def get_config(input_file: os.path = os.path.join(BASE_DIR, "input.json")):
     """
     Get config from input file
     """
@@ -46,14 +73,16 @@ def iterative_sampling_loop(
       3) Merge with previous top x, deduplicate, sort, select top x
       4) Write top x to file (overwrite) each iteration
     """
-    n_samples = config["num_molecules"] * 5
+    # 20% over the submission size: headroom for dedup loss so the first iteration
+    # already writes a full submission, and a run cut short loses one batch not five.
+    n_samples = int(config["num_molecules"] * 1.2)
 
     top_pool = pd.DataFrame(columns=["name", "smiles", "InChIKey", "score"])
 
     iteration = 0
     while True:
         iteration += 1
-        bt.logging.info(f"[Miner] Iteration {iteration}: sampling {n_samples} molecules")
+        log.info(f"[Miner] Iteration {iteration}: sampling {n_samples} molecules")
 
         sampler_data = run_sampler(n_samples=n_samples, 
                         subnet_config=config, 
@@ -63,20 +92,10 @@ def iterative_sampling_loop(
                         )
         
         if not sampler_data:
-            bt.logging.warning("[Miner] No valid molecules produced; continuing")
+            log.warning("[Miner] No valid molecules produced; continuing")
             continue
 
-        score_dict = score_molecules_json(sampler_file_path, 
-                                         config["target_sequences"], 
-                                         config["antitarget_sequences"], 
-                                         config)
-        
-        if not score_dict:
-            bt.logging.warning("[Miner] Scoring failed or mismatched; continuing")
-            continue
-
-        # Calculate final scores per molecule
-        batch_scores = calculate_final_scores(score_dict, sampler_data, config, save_all_scores)
+        batch_scores = calculate_final_scores(sampler_data, config, save_all_scores)
 
         # Merge, deduplicate, sort and take top x
         top_pool = pd.concat([top_pool, batch_scores])
@@ -91,12 +110,11 @@ def iterative_sampling_loop(
         with open(output_path, "w") as f:
             json.dump(top_entries, f, ensure_ascii=False, indent=2)
 
-        bt.logging.info(f"[Miner] Wrote {config['num_molecules']} top molecules to {output_path}")
-        bt.logging.info(f"[Miner] Average score: {top_pool['score'].mean()}")
+        log.info(f"[Miner] Wrote {config['num_molecules']} top molecules to {output_path}")
+        log.info(f"[Miner] Average score: {top_pool['score'].mean()}")
 
-def calculate_final_scores(score_dict: dict, 
-        sampler_data: dict, 
-        config: dict, 
+def calculate_final_scores(sampler_data: dict,
+        config: dict,
         save_all_scores: bool = True,
         current_epoch: int = 0) -> pd.DataFrame:
     """
@@ -113,25 +131,21 @@ def calculate_final_scores(score_dict: dict,
         try:
             inchikey_list.append(Chem.MolToInchiKey(Chem.MolFromSmiles(s)))
         except Exception as e:
-            bt.logging.error(f"Error calculating InChIKey for {s}: {e}")
+            log.error(f"Error calculating InChIKey for {s}: {e}")
             inchikey_list.append(None)
 
-    # Calculate final scores for each molecule
-    targets = score_dict[0]['ps_target_scores']
-    antitargets = score_dict[0]['ps_antitarget_scores']
+    targets = config["target_sequences"]
+    antitargets = config["antitarget_sequences"]
+    per_molecule = score_against_proteins(smiles, targets + antitargets)
+
     final_scores = []
-    for mol_idx in range(len(names)):
-        # target average
-        target_scores_for_mol = [target_list[mol_idx] for target_list in targets]
-        avg_target = sum(target_scores_for_mol) / len(target_scores_for_mol)
-
-        # antitarget average
-        antitarget_scores_for_mol = [antitarget_list[mol_idx] for antitarget_list in antitargets]
-        avg_antitarget = sum(antitarget_scores_for_mol) / len(antitarget_scores_for_mol)
-
-        # final score
-        score = avg_target - (config["antitarget_weight"] * avg_antitarget)
-        final_scores.append(score)
+    for values in per_molecule:
+        target_values = values[:len(targets)]
+        antitarget_values = values[len(targets):]
+        avg_target = sum(target_values) / len(target_values)
+        avg_antitarget = (sum(antitarget_values) / len(antitarget_values)
+                          if antitarget_values else 0.0)
+        final_scores.append(avg_target - config["antitarget_weight"] * avg_antitarget)
 
     # Store final scores in dataframe
     batch_scores = pd.DataFrame({
@@ -143,14 +157,12 @@ def calculate_final_scores(score_dict: dict,
 
     if save_all_scores:
         all_scores = {"scored_molecules": [(mol["name"], mol["score"]) for mol in batch_scores.to_dict(orient="records")]}
-        
-        if os.path.exists(os.path.join(BASE_DIR, f"all_scores_{current_epoch}.json")):
-            with open(os.path.join(BASE_DIR, f"all_scores_{current_epoch}.json"), "r") as f:
+        all_scores_path = os.path.join(OUTPUT_DIR, f"all_scores_{current_epoch}.json")
+        if os.path.exists(all_scores_path):
+            with open(all_scores_path, "r") as f:
                 all_previous_scores = json.load(f)
-            
             all_scores["scored_molecules"] = all_previous_scores["scored_molecules"] + all_scores["scored_molecules"]
-
-        with open(os.path.join(BASE_DIR, f"all_scores_{current_epoch}.json"), "w") as f:
+        with open(all_scores_path, "w") as f:
             json.dump(all_scores, f, ensure_ascii=False, indent=2)
 
     return batch_scores
@@ -158,8 +170,8 @@ def calculate_final_scores(score_dict: dict,
 def main(config: dict):
     iterative_sampling_loop(
         db_path=DB_PATH,
-        sampler_file_path=os.path.join(BASE_DIR, "sampler_file.json"),
-        output_path=os.path.join(BASE_DIR, "output.json"),
+        sampler_file_path=os.path.join(OUTPUT_DIR, "sampler_file.json"),
+        output_path=os.path.join(OUTPUT_DIR, "result.json"),
         config=config,
         save_all_scores=True,
     )
