@@ -116,6 +116,15 @@ async def submit_epoch_results(
             try:
                 with open(scored_sample_path, "r") as f:
                     scored_sample_data = json.load(f)
+                sample = scored_sample_data.get("scored_molecules")
+                if sample:
+                    kept = [m for m in sample if _json_float(m[1]) is not None]
+                    dropped = len(sample) - len(kept)
+                    if dropped:
+                        bt.logging.warning(
+                            f"Dropped {dropped} unscored molecule(s) from scored sample data"
+                        )
+                    scored_sample_data["scored_molecules"] = kept
             except Exception as e:
                 bt.logging.warning(
                     f"Failed to load scored sample data from {scored_sample_path}: {e}"
