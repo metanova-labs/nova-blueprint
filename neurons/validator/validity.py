@@ -1,14 +1,13 @@
 import bittensor as bt
 from rdkit import Chem
-from rdkit.Chem import Descriptors
 
 from utils.molecules import (
     get_smiles,
-    get_heavy_atom_count_from_mol,
     compute_maccs_entropy,
     find_chemically_identical,
     find_too_similar_pairs,
 )
+from utils.filters import check as check_filters, validate_thresholds
 from utils.reactions import is_reaction_allowed
 
 
@@ -32,7 +31,8 @@ def validate_molecules_and_calculate_entropy(
         Dictionary mapping entry ids to their list of valid SMILES strings
     """
     valid_molecules_by_entry = {}
-    
+    filter_thresholds = validate_thresholds(config.get("filters"))
+
     for entry, data in entries_by_id.items():
         valid_smiles = []
         valid_names = []
@@ -87,14 +87,9 @@ def validate_molecules_and_calculate_entropy(
                         valid_smiles = []
                         valid_names = []
                         break
-                    if get_heavy_atom_count_from_mol(mol) < config['min_heavy_atoms']:
-                        bt.logging.warning(f"entry={entry}, molecule='{molecule}' has insufficient heavy atoms")
-                        valid_smiles = []
-                        valid_names = []
-                        break
-                    num_rotatable_bonds = Descriptors.NumRotatableBonds(mol)
-                    if num_rotatable_bonds < config['min_rotatable_bonds'] or num_rotatable_bonds > config['max_rotatable_bonds']:
-                        bt.logging.warning(f"entry={entry}, molecule='{molecule}' has an invalid number of rotatable bonds")
+                    failures = check_filters(mol, filter_thresholds)
+                    if failures:
+                        bt.logging.warning(f"entry={entry}, molecule='{molecule}' rejected: {failures[0]}")
                         valid_smiles = []
                         valid_names = []
                         break
