@@ -14,3 +14,5 @@ artifacts/
 miner_runs_old/
 scripts/
 local/
+combinatorial_db/molecules.sqlite
+libs/nova_miner/combinatorial_db/molecules.sqlite
