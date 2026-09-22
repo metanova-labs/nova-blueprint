@@ -13,3 +13,6 @@ __pycache__
 .git
 .gitignore
 .env
+
+combinatorial_db/molecules.sqlite
+libs/nova_miner/combinatorial_db/molecules.sqlite

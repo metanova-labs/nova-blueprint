@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # Docker image for nova-blueprint; code runs from /app. Scoring happens on the
 # oracle, so this image needs no GPU stack.
 FROM python:3.12-slim AS base
@@ -39,5 +40,9 @@ WORKDIR /app
 FROM base AS final
 WORKDIR /app
 COPY . /app
+
+ADD https://huggingface.co/datasets/Metanova/Mol-Rxn-DB/resolve/sanqi/molecules.sqlite /app/combinatorial_db/molecules.sqlite
+ADD https://huggingface.co/datasets/Metanova/Mol-Rxn-DB/resolve/sanqi/molecules.sqlite /app/libs/nova_miner/combinatorial_db/molecules.sqlite
+
 CMD ["python", "neurons/validator/scheduler.py"]
 
