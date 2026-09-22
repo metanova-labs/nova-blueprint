@@ -113,6 +113,8 @@ def get_challenge_params_from_blockhash(block_hash: str, num_antitargets: int, i
             rxn_count = total_reactions - 1
             allowed_option = (seed % rxn_count) + 1
             result["allowed_reaction"] = f"rxn:{allowed_option}"
+        except RuntimeError:
+            raise
         except Exception as e:
             bt.logging.warning(f"Failed to determine allowed reaction: {e}, defaulting to all reactions allowed")
 
