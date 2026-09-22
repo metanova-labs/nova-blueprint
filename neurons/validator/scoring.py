@@ -73,7 +73,7 @@ def _build_thompson_benchmark_payload(
         # Use a negative UID that is never part of miner ranking/submissions.
         uid = -2
         github_data = None
-        bench_uid_to_data = {uid: {"molecules": molecules, "raw": github_data}}
+        bench_entries = {uid: {"molecules": molecules, "raw": github_data}}
         bench_score_dict = {
             uid: {
                 "target_scores": [[] for _ in range(len(config.get("target_codes", [])))],
@@ -86,7 +86,7 @@ def _build_thompson_benchmark_payload(
         }
 
         bench_valid = validate_molecules_and_calculate_entropy(
-            uid_to_data=bench_uid_to_data,
+            entries_by_id=bench_entries,
             score_dict=bench_score_dict,
             config=config,
             allowed_reaction=config.get("allowed_reaction"),
@@ -98,8 +98,8 @@ def _build_thompson_benchmark_payload(
             target_proteins=target_sequences,
             antitarget_proteins=antitarget_sequences,
             score_dict=bench_score_dict,
-            valid_molecules_by_uid=bench_valid,
-            uid_to_data=bench_uid_to_data,
+            valid_molecules_by_entry=bench_valid,
+            entries_by_id=bench_entries,
             epoch=str(current_epoch),
         )
         bench_score_dict = calculate_final_scores(
@@ -169,7 +169,7 @@ async def process_epoch(
 
         # Validate molecules and calculate entropy
         valid_molecules_by_entry = validate_molecules_and_calculate_entropy(
-            uid_to_data=entries,
+            entries_by_id=entries,
             score_dict=score_dict,
             config=config,
             allowed_reaction=allowed_reaction,
@@ -179,8 +179,8 @@ async def process_epoch(
             target_proteins=target_sequences,
             antitarget_proteins=antitarget_sequences,
             score_dict=score_dict,
-            valid_molecules_by_uid=valid_molecules_by_entry,
-            uid_to_data=entries,
+            valid_molecules_by_entry=valid_molecules_by_entry,
+            entries_by_id=entries,
             epoch=str(current_epoch),
         )
 
@@ -243,8 +243,8 @@ def score_all_proteins_oracle(
     target_proteins: list[str],
     antitarget_proteins: list[str],
     score_dict: dict,
-    valid_molecules_by_uid: dict,
-    uid_to_data: dict = None,
+    valid_molecules_by_entry: dict,
+    entries_by_id: dict = None,
     epoch: str = "",
 ) -> None:
     """Score every valid molecule against every protein and fill score_dict.
@@ -258,23 +258,23 @@ def score_all_proteins_oracle(
     if not all_proteins:
         return
 
-    def _blank(uid: int) -> int:
+    def _blank(entry) -> int:
         n = 0
-        if uid_to_data:
-            n = len(uid_to_data.get(uid, {}).get("molecules", []))
+        if entries_by_id:
+            n = len(entries_by_id.get(entry, {}).get("molecules", []))
         for col in range(len(target_proteins)):
-            score_dict[uid]["target_scores"][col] = [-math.inf] * n
-            score_dict[uid]["target_metrics"][col] = [None] * n
+            score_dict[entry]["target_scores"][col] = [-math.inf] * n
+            score_dict[entry]["target_metrics"][col] = [None] * n
         for col in range(len(antitarget_proteins)):
-            score_dict[uid]["antitarget_scores"][col] = [-math.inf] * n
-            score_dict[uid]["antitarget_metrics"][col] = [None] * n
+            score_dict[entry]["antitarget_scores"][col] = [-math.inf] * n
+            score_dict[entry]["antitarget_metrics"][col] = [None] * n
         return n
 
     unique: dict[str, None] = {}
-    for uid, valid in valid_molecules_by_uid.items():
+    for entry, valid in valid_molecules_by_entry.items():
         smiles_list = valid.get("smiles") or []
         if not smiles_list:
-            _blank(uid)
+            _blank(entry)
             continue
         for smiles in smiles_list:
             unique[smiles] = None
@@ -305,7 +305,7 @@ def score_all_proteins_oracle(
             values[smiles] = [combine(m, heavy) for m in row["scores"]]
             metrics[smiles] = list(row["scores"])
 
-    for uid, valid in valid_molecules_by_uid.items():
+    for entry, valid in valid_molecules_by_entry.items():
         smiles_list = valid.get("smiles") or []
         if not smiles_list:
             continue
@@ -313,12 +313,12 @@ def score_all_proteins_oracle(
             value_col = [values.get(s, failed_values)[protein_idx] for s in smiles_list]
             metric_col = [metrics.get(s, failed_metrics)[protein_idx] for s in smiles_list]
             if protein_idx < len(target_proteins):
-                score_dict[uid]["target_scores"][protein_idx] = value_col
-                score_dict[uid]["target_metrics"][protein_idx] = metric_col
+                score_dict[entry]["target_scores"][protein_idx] = value_col
+                score_dict[entry]["target_metrics"][protein_idx] = metric_col
             else:
                 col = protein_idx - len(target_proteins)
-                score_dict[uid]["antitarget_scores"][col] = value_col
-                score_dict[uid]["antitarget_metrics"][col] = metric_col
+                score_dict[entry]["antitarget_scores"][col] = value_col
+                score_dict[entry]["antitarget_metrics"][col] = metric_col
 
     bt.logging.info(
         f"Scored {len(unique)} unique molecules against {len(all_proteins)} proteins")
