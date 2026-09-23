@@ -1,7 +1,7 @@
 from rdkit import Chem
-from rdkit.Chem import Descriptors
 
-from nova_miner.utils import get_smiles, get_heavy_atom_count_from_mol
+from nova_miner.utils.filters import check as check_filters, validate_thresholds
+from nova_miner.utils import get_smiles
 
 
 def validate_molecules_sampler(
@@ -17,6 +17,7 @@ def validate_molecules_sampler(
 
     Returns (names, smiles) for the molecules that passed.
     """
+    filter_thresholds = validate_thresholds(config.get("filters"))
     valid_names: list[str] = []
     valid_smiles: list[str] = []
 
@@ -30,10 +31,7 @@ def validate_molecules_sampler(
             mol = Chem.MolFromSmiles(smiles)
             if mol is None:
                 continue
-            if get_heavy_atom_count_from_mol(mol) < config["min_heavy_atoms"]:
-                continue
-            rotatable = Descriptors.NumRotatableBonds(mol)
-            if not config["min_rotatable_bonds"] <= rotatable <= config["max_rotatable_bonds"]:
+            if check_filters(mol, filter_thresholds):
                 continue
         except Exception:
             continue

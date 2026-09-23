@@ -18,12 +18,10 @@ def load_config(path: str = os.path.join(BASE_DIR, "config/config.yaml")):
     
     validation_config = config["molecule_validation"]
     antitarget_weight = validation_config["antitarget_weight"]
-    min_heavy_atoms = validation_config["min_heavy_atoms"]
-    min_rotatable_bonds = validation_config["min_rotatable_bonds"]
-    max_rotatable_bonds = validation_config["max_rotatable_bonds"]
     num_molecules = validation_config["num_molecules"]
     entropy_min_threshold = validation_config["entropy_min_threshold"]
     tanimoto_max_threshold = float(validation_config.get("tanimoto_max_threshold", 1.0))
+    filters = validation_config["filters"]
 
     # Load reaction filtering configuration
     reaction_config = config["reaction_filtering"]
@@ -44,9 +42,7 @@ def load_config(path: str = os.path.join(BASE_DIR, "config/config.yaml")):
     return {
         'num_antitargets': num_antitargets,
         'antitarget_weight': antitarget_weight,
-        'min_heavy_atoms': min_heavy_atoms,
-        'min_rotatable_bonds': min_rotatable_bonds,
-        'max_rotatable_bonds': max_rotatable_bonds,
+        'filters': filters,
         'num_molecules': num_molecules,
         'entropy_min_threshold': entropy_min_threshold,
         'tanimoto_max_threshold': tanimoto_max_threshold,

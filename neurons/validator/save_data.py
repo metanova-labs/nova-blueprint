@@ -178,9 +178,6 @@ async def submit_epoch_results(
             "scoring_formula": scoring_formula,
             "config": {
                 "antitarget_weight": config.get("antitarget_weight", 1.0),
-                "min_rotatable_bonds": config.get("min_rotatable_bonds", 0),
-                "max_rotatable_bonds": config.get("max_rotatable_bonds", 0),
-                "min_heavy_atoms": config.get("min_heavy_atoms", 0),
                 "num_molecules": config.get("num_molecules", 0),
                 "entropy_threshold": config.get("entropy_min_threshold", 0.0),
                 "time_budget": config.get("time_budget_sec", 0),

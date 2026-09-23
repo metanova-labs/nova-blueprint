@@ -16,6 +16,7 @@ from miner_utils import validate_molecules_sampler
 
 log = logging.getLogger(__name__)
 from nova_miner.combinatorial_db.reactions import (
+    get_molecules_by_role,
     get_reaction_info, 
     get_smiles_from_reaction
 )
@@ -46,34 +47,6 @@ def get_available_reactions(db_path: str = None) -> List[Tuple[int, str, int, in
     except Exception as e:
         log.error(f"Error getting available reactions: {e}")
         return []
-
-
-def get_molecules_by_role(role_mask: int, db_path: str) -> List[Tuple[int, str, int]]:
-    """
-    Get all molecules that have the specified role_mask.
-    
-    Args:
-        role_mask: The role mask to filter by
-        db_path: Path to the molecules database
-        
-    Returns:
-        List of tuples (mol_id, smiles, role_mask) for molecules that match the role
-    """
-    try:
-        abs_db_path = os.path.abspath(db_path)
-        conn = sqlite3.connect(f"file:{abs_db_path}?mode=ro&immutable=1", uri=True)
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT mol_id, smiles, role_mask FROM molecules WHERE (role_mask & ?) = ?", 
-            (role_mask, role_mask)
-        )
-        results = cursor.fetchall()
-        conn.close()
-        return results
-    except Exception as e:
-        log.error(f"Error getting molecules by role {role_mask}: {e}")
-        return []
-
 
 
 def generate_valid_random_molecules_batch(rxn_id: int, n_samples: int, db_path: str, subnet_config: dict, 

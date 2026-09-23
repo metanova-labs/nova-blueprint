@@ -12,9 +12,7 @@ def _extract_miner_config(cfg: dict) -> Dict[str, Any]:
     return {
         "antitarget_weight": cfg["antitarget_weight"],
         "entropy_min_threshold": cfg["entropy_min_threshold"],
-        "min_heavy_atoms": cfg["min_heavy_atoms"],
-        "min_rotatable_bonds": cfg["min_rotatable_bonds"],
-        "max_rotatable_bonds": cfg["max_rotatable_bonds"],
+        "filters": cfg["filters"],
         "num_molecules": cfg["num_molecules"],
         "tanimoto_max_threshold": cfg["tanimoto_max_threshold"],
     }

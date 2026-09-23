@@ -2,7 +2,7 @@ from .molecules import (
     get_smiles, 
     get_heavy_atom_count,
     get_heavy_atom_count_from_mol,
-    compute_maccs_entropy,
+    compute_fingerprint_entropy,
     find_chemically_identical
 )
 from .proteins import get_sequence_from_protein_code, get_code_from_protein_sequence
