@@ -4,7 +4,7 @@ import bittensor as bt
 
 
 def get_total_reactions() -> int:
-    """Query database for total number of reactions, add 1 for savi option."""
+    """Query database for total number of reactions."""
     try:
         db_path = os.path.join(os.path.dirname(__file__), "../libs/nova_miner/combinatorial_db/molecules.sqlite")
         conn = sqlite3.connect(db_path)
@@ -12,7 +12,7 @@ def get_total_reactions() -> int:
         cursor.execute("SELECT COUNT(*) FROM reactions")
         count = cursor.fetchone()[0]
         conn.close()
-        return count + 1  # +1 for savi option
+        return count
     except Exception as e:
         raise RuntimeError(
             f"Could not query the combinatorial database reaction count: {e}"
