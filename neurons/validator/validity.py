@@ -3,7 +3,7 @@ from rdkit import Chem
 
 from utils.molecules import (
     get_smiles,
-    compute_maccs_entropy,
+    compute_fingerprint_entropy,
     find_chemically_identical,
     find_too_similar_pairs,
 )
@@ -18,7 +18,7 @@ def validate_molecules_and_calculate_entropy(
     allowed_reaction: str = None
 ) -> dict[int, dict[str, list[str]]]:
     """
-    Validates molecules for every entry and calculates their MACCS entropy.
+    Validates molecules for every entry and calculates their fingerprint entropy.
     Updates the score_dict with entropy values.
     
     Args:
@@ -146,7 +146,7 @@ def validate_molecules_and_calculate_entropy(
         # Calculate entropy if we have valid molecules, or skip if below threshold
         if valid_smiles:
             try:
-                entropy = compute_maccs_entropy(valid_smiles)
+                entropy = compute_fingerprint_entropy(valid_smiles)
                 if entropy > config['entropy_min_threshold']:
                     score_dict[entry]["entropy"] = entropy
                     valid_molecules_by_entry[entry] = {"smiles": valid_smiles, "names": valid_names}
