@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 import threading
 
-from config.config_loader import load_time_budget_sec  
+from config.config_loader import load_sandbox_limits, load_time_budget_sec  
 from sandbox.broker import Broker
 import bittensor as bt
 
@@ -18,6 +18,7 @@ DATA_WORK_ROOT = Path("/data/miner_runs")
 DATA_RESULTS_ROOT = Path("/data/results")
 
 SANDBOX_IMAGE_TAG = "urdof7/miner-sandbox:latest"
+SANDBOX_DB_DIR = "/usr/local/lib/python3.12/site-packages/nova_miner/combinatorial_db"
 
 
 def ensure_docker_image() -> None:
@@ -70,6 +71,7 @@ def prepare_workdir(source_dir: Path, challenge_params: dict, dest_dir: Optional
 
 def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tuple[int, str]:
     timeout_seconds = load_time_budget_sec() 
+    limits = load_sandbox_limits()
     def _to_str(x) -> str:
         if x is None:
             return ""
@@ -104,7 +106,7 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
     # Ensure any previous container with the same name is removed
     try:
         subprocess.run(
-            ["docker", "rm", "-f", container_name],
+            ["docker", "rm", "-f", "-v", container_name],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -117,7 +119,12 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
         "--read-only",
         "--cap-drop=ALL",
         "--security-opt", "no-new-privileges:true",
-        "--tmpfs", "/tmp:rw,noexec,nosuid,nodev",
+        f"--memory={limits['memory']}",
+        f"--memory-swap={limits['memory']}",
+        f"--cpus={limits['cpus']}",
+        f"--pids-limit={limits['pids_limit']}",
+        "--tmpfs", f"/tmp:rw,noexec,nosuid,nodev,size={limits['tmp_size']}",
+        "--tmpfs", f"{SANDBOX_DB_DIR}:rw,noexec,nosuid,nodev,mode=1777,size={limits['db_size']}",
         "--network=none",
         "--user", f"{host_uid}:{host_gid}",
         "-e", "HOME=/tmp",
@@ -177,7 +184,7 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
                     logf.write(f"timeout: removing container by name {container_name}\n")
                     logf.flush()
                     subprocess.run(
-                        ["docker", "rm", "-f", container_name],
+                        ["docker", "rm", "-f", "-v", container_name],
                         check=False,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,

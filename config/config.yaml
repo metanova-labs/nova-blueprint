@@ -72,4 +72,9 @@ run:
   # Fraction of non-burn weights to route to the override UID
   emission_target_override_share: 1.0
 
-
+sandbox:
+  memory: 48g
+  cpus: 14
+  pids_limit: 4096
+  tmp_size: 32g
+  db_size: 1g
