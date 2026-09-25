@@ -60,9 +60,7 @@ def get_molecules(mol_ids: list, db_path: str) -> list:
 def get_molecules_by_role(role_mask: int, db_path: str) -> list:
     """[(mol_id, smiles, role_mask), ...] for every molecule filling the role.
 
-    Uses the molecule_roles index when build_index.py has been run, and otherwise
-    scans the masks directly. The scan is roughly 10x slower per call but the
-    database ships without the index, since resolving a molecule id never needs it.
+    Uses the molecule_roles index when present, otherwise scans the masks directly.
     """
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)

@@ -9,9 +9,10 @@ COPY libs/nova_miner /usr/local/lib/python3.12/site-packages/nova_miner
 
 ADD https://huggingface.co/datasets/Metanova/Mol-Rxn-DB/resolve/sanqi/molecules.sqlite /usr/local/lib/python3.12/site-packages/nova_miner/combinatorial_db/molecules.sqlite
 
-# Ensure DB directory is writable by mineruser
-RUN chown -R mineruser:appgroup /usr/local/lib/python3.12/site-packages/nova_miner/combinatorial_db \
-    && chmod -R 775 /usr/local/lib/python3.12/site-packages/nova_miner/combinatorial_db
+RUN python /usr/local/lib/python3.12/site-packages/nova_miner/combinatorial_db/build_index.py /usr/local/lib/python3.12/site-packages/nova_miner/combinatorial_db/molecules.sqlite \
+    && chown -R mineruser:appgroup /usr/local/lib/python3.12/site-packages/nova_miner/combinatorial_db \
+    && chmod -R 775 /usr/local/lib/python3.12/site-packages/nova_miner/combinatorial_db \
+    && cp -a /usr/local/lib/python3.12/site-packages/nova_miner/combinatorial_db /opt/combinatorial_db
 
 ENV PIP_NO_CACHE_DIR=1 \
     HOME=/tmp \
@@ -20,8 +21,9 @@ ENV PIP_NO_CACHE_DIR=1 \
 RUN python -m pip install --upgrade pip && \
     python -m pip install -r /usr/local/lib/python3.12/site-packages/nova_miner/requirements/sandbox.txt
 
+COPY sandbox/entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
+
 # Drop privileges
 USER mineruser
 
-# Entrypoint: run /workspace/miner.py as a script
-ENTRYPOINT ["python", "/workspace/miner.py"]
+ENTRYPOINT ["sh", "/usr/local/bin/sandbox-entrypoint.sh"]

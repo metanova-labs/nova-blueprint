@@ -62,3 +62,10 @@ def load_time_budget_sec(path: str = os.path.join(BASE_DIR, "config/config.yaml"
         return int(yaml.safe_load(f)["run"]["time_budget_sec"]) 
 
 
+def load_sandbox_limits(path: str = os.path.join(BASE_DIR, "config/config.yaml")) -> dict:
+    """Per-run sandbox resource limits. Every key is required."""
+    with open(path, "r", encoding="utf-8") as f:
+        sandbox = yaml.safe_load(f)["sandbox"]
+    return {k: sandbox[k] for k in ("memory", "cpus", "pids_limit", "tmp_size", "db_size")}
+
+
