@@ -22,6 +22,29 @@ REGISTER_TIMEOUT_S = 1800   # a new target needs an alignment search
 # request costs ceil(predictions / shards) rounds. 480 is a whole number of
 # rounds at 24 shards and stays under the server's 512 cap.
 MAX_PREDICTIONS = 480
+MAX_BOLTZ2_OPTIONS_BYTES = 64 * 1024
+
+
+def validate_boltz2_options(value) -> dict | None:
+    """Return the complete JSON Boltz-2 configuration supplied by a miner.
+
+    Blueprint deliberately does not maintain a model-parameter allowlist: that
+    would hide new Boltz-2 controls until every validator upgraded its broker.
+    The oracle owns model-specific validation and resource limits. The broker
+    only guarantees a bounded, JSON-serializable object before forwarding it.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("boltz2 must be an object")
+    try:
+        encoded = json.dumps(value, allow_nan=False, separators=(",", ":")).encode()
+    except (TypeError, ValueError) as exc:
+        raise ValueError("boltz2 must contain finite JSON values") from exc
+    if len(encoded) > MAX_BOLTZ2_OPTIONS_BYTES:
+        raise ValueError(
+            f"boltz2 configuration exceeds {MAX_BOLTZ2_OPTIONS_BYTES} bytes")
+    return dict(value)
 
 
 def _post(path: str, body: dict, timeout: float) -> tuple[int, bytes]:
@@ -74,13 +97,20 @@ class _Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length))
             targets, smiles = body["targets"], body["smiles"]
-        except (ValueError, KeyError, TypeError):
-            return self._send(400, b'{"detail":"bad request"}')
+            boltz2 = validate_boltz2_options(body.get("boltz2"))
+        except (ValueError, KeyError, TypeError) as exc:
+            detail = str(exc) if str(exc) else "bad request"
+            return self._send(400, json.dumps({"detail": detail}).encode())
+
+        forwarded = {
+            "miner": self.server.miner, "epoch": self.server.epoch,
+            "targets": targets, "smiles": smiles,
+        }
+        if boltz2 is not None:
+            forwarded["boltz2"] = boltz2
 
         # Identity comes from the run.
-        status, payload = _post("/v1/score", {
-            "miner": self.server.miner, "epoch": self.server.epoch,
-            "targets": targets, "smiles": smiles}, TIMEOUT_S)
+        status, payload = _post("/v1/score", forwarded, TIMEOUT_S)
         self._send(status, payload)
 
     def _send(self, status: int, payload: bytes) -> None:
