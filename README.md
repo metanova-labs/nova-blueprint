@@ -60,7 +60,7 @@ Must‑haves:
 - Read input from `/workspace/input.json`
 - Write output to `/output/result.json` with exactly `num_molecules` reaction‑formatted molecules (`rxn:*`)
 
-**Rules**: everything your submission runs must be present as readable source, and the molecules must be generated inside the sandbox. Precomputed results, seeded molecule lists, and compiled artifacts are ineligible. If your approach needs something the sandbox does not provide, contact the NOVA team.
+**Rules**: everything your submission runs must be present as readable source, and every molecule must be generated inside the sandbox, so compiled artifacts, precomputed results and seeded molecule lists are ineligible. What the search looks for must come from `input.json` or be learned from oracle reads during the run. How you design and tune the models and search that do this learning is up to you, but priors on which molecules score well are ineligible, whether hard-coded (on molecular properties, substructures, reactions or building blocks) or fitted offline. If your approach needs something the sandbox does not provide, contact the NOVA team.
 
 Minimal example `result.json`:
 ```json
