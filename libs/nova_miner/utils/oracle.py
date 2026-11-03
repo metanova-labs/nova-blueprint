@@ -36,9 +36,22 @@ class Oracle:
         self.socket_path = socket_path
         self.timeout = timeout
 
-    def score(self, targets: list[str], smiles: list[str]) -> list[dict]:
-        """results[i]["scores"][t] is smiles[i] against targets[t], or None."""
-        body = json.dumps({"targets": list(targets), "smiles": list(smiles)})
+    def score(self, targets: list[str], smiles: list[str], *,
+              boltz2: dict | None = None) -> list[dict]:
+        """Score molecules, optionally with a miner-selected Boltz-2 configuration.
+
+        ``boltz2`` is forwarded through the Blueprint broker after it has been
+        validated against the broker's allowlist. It only affects exploratory
+        miner calls; the validator's final scoring path does not set it.
+
+        results[i]["scores"][t] is smiles[i] against targets[t], or None.
+        """
+        request = {"targets": list(targets), "smiles": list(smiles)}
+        if boltz2 is not None:
+            if not isinstance(boltz2, dict):
+                raise TypeError("boltz2 must be a dict")
+            request["boltz2"] = dict(boltz2)
+        body = json.dumps(request)
         connection = _UnixConnection(self.socket_path, self.timeout)
         try:
             connection.request("POST", "/v1/score", body,
