@@ -16,12 +16,9 @@ ORACLE_URL = os.environ.get("ORACLE_URL", "")
 ORACLE_TOKEN = os.environ.get("ORACLE_TOKEN", "")
 
 TIMEOUT_S = 900
-REGISTER_TIMEOUT_S = 1800   # a new target needs an alignment search
+REGISTER_TIMEOUT_S = 1800   # a new target is prepared first
 
-# The oracle spreads a request across its shards and waits for the slowest, so a
-# request costs ceil(predictions / shards) rounds. 480 is a whole number of
-# rounds at 24 shards and stays under the server's 512 cap.
-MAX_PREDICTIONS = 480
+MAX_PREDICTIONS = 512   # the oracle's cap per request, counting (molecule, protein) pairs
 
 
 def _post(path: str, body: dict, timeout: float) -> tuple[int, bytes]:

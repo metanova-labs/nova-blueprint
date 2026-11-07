@@ -1,4 +1,4 @@
-"""Boltz-2 molecular scoring, via the oracle."""
+"""Molecular scoring, via the oracle."""
 
 import math
 import os
@@ -19,11 +19,10 @@ if LIBS_DIR not in sys.path:
 from nova_miner.utils.oracle import FORMULA, combine
 
 from utils.proteins import get_code_from_protein_sequence
-from utils.molecules import get_heavy_atom_count
 from neurons.validator.validity import validate_molecules_and_calculate_entropy
 from sandbox.broker import score as oracle_score, MAX_PREDICTIONS
 
-SCORING_MODEL = "boltz2"
+SCORING_MODEL = "nesso"
 from neurons.validator.ranking import calculate_final_scores
 from neurons.validator.contest import apply_contest_transition
 from neurons.validator.save_data import submit_epoch_results
@@ -301,8 +300,7 @@ def score_all_proteins_oracle(
                 metrics[smiles] = failed_metrics
             continue
         for smiles, row in zip(chunk, rows):
-            heavy = get_heavy_atom_count(smiles)
-            values[smiles] = [combine(m, heavy) for m in row["scores"]]
+            values[smiles] = [combine(m) for m in row["scores"]]
             metrics[smiles] = list(row["scores"])
 
     for entry, valid in valid_molecules_by_entry.items():
