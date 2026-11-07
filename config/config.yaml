@@ -1,6 +1,6 @@
 # Number of targets and antitargets to select
 protein_selection:
-  num_antitargets: 0
+  num_antitargets: 2
 
 # Parameters for validating and scoring molecules
 molecule_validation:
