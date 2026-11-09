@@ -23,18 +23,13 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout,
 log = logging.getLogger("miner")
 
 from nova_miner.utils.oracle import Oracle, combine
-from nova_miner.utils.molecules import get_heavy_atom_count
 from random_sampler import run_sampler
 from nova_miner.combinatorial_db.reactions import get_smiles_from_reaction
 
 DB_PATH = str(Path(nova_miner.__file__).resolve().parent / "combinatorial_db" / "molecules.sqlite")
 
 ORACLE = Oracle(os.environ["ORACLE_SOCKET"])
-MAX_PREDICTIONS = 480   # per request, counting (molecule, target) pairs.
-# The oracle round-robins a request across its 24 shards and waits for the
-# slowest, so a request costs ceil(predictions / 24) rounds. 480 is a multiple
-# of 24 and under the server's 512 cap, and leaves room for a whole batch in
-# one request so it is not split into a full chunk plus a short one.
+MAX_PREDICTIONS = 512   # the oracle's cap per request, counting (molecule, protein) pairs
 
 
 def score_against_proteins(smiles: list[str], proteins: list[str]) -> list[list[float]]:
@@ -45,8 +40,7 @@ def score_against_proteins(smiles: list[str], proteins: list[str]) -> list[list[
     for start in range(0, len(unique), per_request):
         rows.extend(ORACLE.score(proteins, unique[start:start + per_request]))
 
-    heavy = {s: get_heavy_atom_count(s) for s in unique}
-    scored = {s: [combine(m, heavy[s]) for m in row["scores"]]
+    scored = {s: [combine(m) for m in row["scores"]]
               for s, row in zip(unique, rows)}
     return [scored[s] for s in smiles]
 

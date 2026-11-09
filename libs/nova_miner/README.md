@@ -5,7 +5,7 @@ image at `site-packages/nova_miner`.
 
 ## Contents
 
-- `utils.oracle` — `Oracle.score()` requests Boltz-2 affinity predictions over the
+- `utils.oracle` — `Oracle.score()` requests Nesso-1 affinity predictions over the
   broker's unix socket; `combine()` reduces one prediction to the NOVA score.
 - `utils.molecules` — SMILES lookup, heavy-atom counts, MACCS entropy, chemical
   identity grouping.
@@ -17,11 +17,10 @@ image at `site-packages/nova_miner`.
 ```python
 import os
 from nova_miner.utils.oracle import Oracle, combine
-from nova_miner.utils.molecules import get_heavy_atom_count
 
 oracle = Oracle(os.environ["ORACLE_SOCKET"])
 rows = oracle.score(targets=[target_sequence], smiles=[smiles])
-score = combine(rows[0]["scores"][0], get_heavy_atom_count(smiles))
+score = combine(rows[0]["scores"][0])
 ```
 
 Higher is better. `combine` returns `-inf` where the oracle returned no prediction.

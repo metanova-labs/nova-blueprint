@@ -59,16 +59,15 @@ def _detail(payload: bytes) -> str:
         return payload.decode(errors="replace")[:200]
 
 
-FORMULA = "(affinity_probability_binary - affinity_pred_value) / heavy_atom_count"
+FORMULA = "clip(6 - affinity_pred_value, 1, 11)"
 
 
-def combine(scores: dict | None, heavy_atom_count: int) -> float:
+def combine(scores: dict | None) -> float:
     """One number per (molecule, target), higher is better.
 
-    The two affinity metrics differenced -- they point opposite ways -- then
-    normalised by molecule size so bigger is not automatically better.
+    pIC50 = 6 - affinity_pred_value, since affinity_pred_value is log10(IC50 / uM),
+    clipped to [1, 11].
     """
-    if not scores or not heavy_atom_count:
+    if not scores:
         return -math.inf
-    return (scores["affinity_probability_binary"]
-            - scores["affinity_pred_value"]) / heavy_atom_count
+    return min(max(6.0 - scores["affinity_pred_value"], 1.0), 11.0)

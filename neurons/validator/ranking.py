@@ -34,8 +34,8 @@ def calculate_final_scores(
         entropy = score_dict[uid]['entropy']
 
         # Replace None with -inf
-        targets = [[-math.inf if not s else s for s in sublist] for sublist in targets]
-        antitargets = [[-math.inf if not s else s for s in sublist] for sublist in antitargets]
+        targets = [[-math.inf if s is None else s for s in sublist] for sublist in targets]
+        antitargets = [[-math.inf if s is None else s for s in sublist] for sublist in antitargets]
 
         # Get number of molecules (length of any target score list)
         if not targets or not targets[0]:

@@ -3,7 +3,7 @@
 ML‑driven drug discovery on Bittensor.
 NOVA Blueprint powers SN68 by running competitive cycles that explore vast chemical spaces, collect candidate molecules, and iteratively build on the best‑performing approaches.
 
-This codebase implements the SN68 validator scheduler and the sandboxed miner runner: it pulls miner snapshots from the submission API + MinIO archive, generates per‑cycle challenges, executes miners in an isolated Docker sandbox within a fixed time budget, and collects `/output/result.json`. Binding affinity is predicted by a Boltz-2 oracle, which both the sandbox and the validator score against.
+This codebase implements the SN68 validator scheduler and the sandboxed miner runner: it pulls miner snapshots from the submission API + MinIO archive, generates per‑cycle challenges, executes miners in an isolated Docker sandbox within a fixed time budget, and collects `/output/result.json`. Binding affinity is predicted by a Nesso-1 oracle, which both the sandbox and the validator score against.
 
 ### System Requirements (validators)
 - Docker with docker compose plugin
@@ -69,19 +69,18 @@ Minimal example `result.json`:
 }
 ```
 
-**Scoring**: binding affinity comes from the oracle, reached over the unix socket at `$ORACLE_SOCKET`. One request covers every (molecule, target) pair.
+**Scoring**: binding affinity comes from the oracle, reached over the unix socket at `$ORACLE_SOCKET`. One request covers every (molecule, protein) pair.
 
 ```python
 import os
 from nova_miner.utils.oracle import Oracle, combine
-from nova_miner.utils.molecules import get_heavy_atom_count
 
 oracle = Oracle(os.environ["ORACLE_SOCKET"])
-rows = oracle.score(targets=target_sequences, smiles=["CCO"])
-score = combine(rows[0]["scores"][0], get_heavy_atom_count("CCO"))
+rows = oracle.score(targets=target_sequences + antitarget_sequences, smiles=["CCO"])
+pic50 = [combine(m) for m in rows[0]["scores"]]
 ```
 
-`combine` reduces the Boltz-2 metrics to the number you are ranked by; higher is better, `-inf` where no prediction was returned. Requests are spread across the oracle's 24 shards, so twenty-four pairs cost about as much as one — batch widely. `neurons/miner/` is an example.
+`combine` reduces one prediction to the predicted pIC50, `6 - affinity_pred_value` clipped to [1, 11] (`affinity_pred_value` is log10(IC50 / µM)), so higher is better and `-inf` where no prediction was returned. A molecule scores its mean target pIC50 minus `antitarget_weight` times its mean anti-target pIC50, and a submission scores the mean over its molecules; the sequences and weight are in `input.json`. Requests are spread across the oracle's shards, so many pairs cost about as much as one — batch widely. `neurons/miner/` is an example.
 
 **Note - Combinatorial SQLite DB**: open the provided database in read‑only mode to avoid write errors on a read‑only filesystem. Example: `sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True)`.
 
