@@ -18,6 +18,7 @@ DATA_WORK_ROOT = Path("/data/miner_runs")
 DATA_RESULTS_ROOT = Path("/data/results")
 
 SANDBOX_IMAGE_TAG = "urdof7/miner-sandbox:latest"
+SANDBOX_UID = 10001  # mineruser in sandbox/Dockerfile
 SANDBOX_DB_DIR = "/usr/local/lib/python3.12/site-packages/nova_miner/combinatorial_db"
 
 
@@ -57,13 +58,9 @@ def prepare_workdir(source_dir: Path, challenge_params: dict, dest_dir: Optional
     with open(workdir / "input.json", "w", encoding="utf-8") as f:
         json.dump(challenge_params, f)
 
-    # Ensure outdir is writable by the sandbox user
-    try:
-        host_uid = os.stat(PROJECT_ROOT).st_uid
-        host_gid = os.stat(PROJECT_ROOT).st_gid
-        os.chown(outdir, host_uid, host_gid)
-    except Exception:
-        pass
+    workdir.chmod(0o755)
+    os.chown(outdir, SANDBOX_UID, -1)
+    outdir.chmod(0o700)
 
 
     return workdir, outdir
@@ -93,8 +90,6 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
         host_outdir = (host_runs_root / rel_out).resolve()
     except Exception:
         host_outdir = outdir
-    host_uid = os.stat(PROJECT_ROOT).st_uid
-    host_gid = os.stat(PROJECT_ROOT).st_gid
 
     # docker -v is resolved by the host daemon, so pass the host path.
     sock_path = workdir / "oracle.sock"
@@ -126,7 +121,7 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
         "--tmpfs", f"/tmp:rw,noexec,nosuid,nodev,size={limits['tmp_size']}",
         "--tmpfs", f"{SANDBOX_DB_DIR}:rw,noexec,nosuid,nodev,mode=1777,size={limits['db_size']}",
         "--network=none",
-        "--user", f"{host_uid}:{host_gid}",
+        "--user", str(SANDBOX_UID),
         "-e", "HOME=/tmp",
         "-e", "XDG_CACHE_HOME=/tmp",
         "-e", "MPLCONFIGDIR=/tmp",
