@@ -1,11 +1,9 @@
 import os
-import tarfile
 from pathlib import Path
 from typing import Optional, Dict
 
 from minio import Minio
 from minio.error import S3Error
-import shutil
 
 
 SNAPSHOT_BUCKET = "blueprint-boltz-code-archive"
@@ -48,110 +46,19 @@ def _resolve_snapshot_key(epoch: int, hotkey: str) -> Optional[str]:
         raise
 
 
-def download_and_extract_snapshot(
-    epoch: int,
-    hotkey: str,
-    work_root: Path,
-    dest_dir: Path,
-) -> Optional[Path]:
-    """
-    Download the archived snapshot for (epoch, hotkey) from MinIO and extract it into dest_dir.
-
-    Returns the extracted repository directory Path on success, or None if no snapshot exists.
-    Raises on hard MinIO errors or filesystem issues.
-    """
-    client = _create_minio_client()
-    bucket_name = SNAPSHOT_BUCKET
-
+def download_snapshot(epoch: int, hotkey: str, archive_path: Path) -> Optional[Path]:
     key = _resolve_snapshot_key(epoch=epoch, hotkey=hotkey)
-    if not key:
+    if key is None:
         return None
-
-    work_root = work_root.resolve()
-    work_root.mkdir(parents=True, exist_ok=True)
-    archive_path = work_root / f"{epoch}_{hotkey}_snapshot.tar.gz"
-
-    client.fget_object(bucket_name, key, str(archive_path))
-
-    dest_dir = dest_dir.resolve()
-    if dest_dir.exists():
-        import shutil
-
-        shutil.rmtree(dest_dir, ignore_errors=True)
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    target_dir = dest_dir
-
-    with tarfile.open(archive_path, "r:gz") as tar:
-        tar.extractall(path=target_dir)
-    try:
-        archive_path.unlink(missing_ok=True)  # type: ignore[call-arg]
-    except TypeError:
-        # Python < 3.8 compatibility (missing_ok not supported)
-        try:
-            if archive_path.exists():
-                archive_path.unlink()
-        except Exception:
-            pass
-
-    repo_root = _resolve_repo_root(target_dir)
-    return repo_root
+    _create_minio_client().fget_object(SNAPSHOT_BUCKET, key, str(archive_path))
+    archive_path.chmod(0o444)
+    return archive_path
 
 
-def _resolve_repo_root(extracted_dir: Path) -> Path:
-    """
-    Find the directory containing miner.py.
-    Handles both: miner.py at root, or miner.py inside a single top-level subdir (submission API format).
-    """
-    extracted_dir = extracted_dir.resolve()
-    if (extracted_dir / "miner.py").is_file():
-        return extracted_dir
-    subdirs = [d for d in extracted_dir.iterdir() if d.is_dir()]
-    if len(subdirs) == 1 and (subdirs[0] / "miner.py").is_file():
-        return subdirs[0]
-    for d in subdirs:
-        if (d / "miner.py").is_file():
-            return d
-
-    return extracted_dir
-
-def download_benchmark_snapshot(
-    work_root: Path,
-    dest_dir: Path,
-    name: str,
-) -> Path:
-    """
-    Download and extract a benchmark snapshot into dest_dir.
-    """
-    client = _create_minio_client()
-    bucket = SNAPSHOT_BUCKET
-
-    object_key = BENCHMARK_OBJECT_KEYS.get(str(name))
-    if not object_key:
-        raise ValueError(
-            f"Unknown benchmark snapshot name '{name}'. "
-            f"Known: {sorted(BENCHMARK_OBJECT_KEYS.keys())}"
-        )
-
-    work_root = work_root.resolve()
-    work_root.mkdir(parents=True, exist_ok=True)
-    archive_path = work_root / f"benchmark_{name}.tar.gz"
-
-    client.fget_object(bucket, object_key, str(archive_path))
-
-    dest_dir = dest_dir.resolve()
-    if dest_dir.exists():
-        shutil.rmtree(dest_dir, ignore_errors=True)
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    with tarfile.open(archive_path, "r:gz") as tar:
-        tar.extractall(path=dest_dir)
-    try:
-        archive_path.unlink(missing_ok=True) 
-    except TypeError:
-        if archive_path.exists():
-            archive_path.unlink()
-
-    return dest_dir
-
-
-
+def download_benchmark_snapshot(archive_path: Path, name: str) -> Path:
+    object_key = BENCHMARK_OBJECT_KEYS.get(name)
+    if object_key is None:
+        raise ValueError(f"Unknown benchmark snapshot name: {name}")
+    _create_minio_client().fget_object(SNAPSHOT_BUCKET, object_key, str(archive_path))
+    archive_path.chmod(0o444)
+    return archive_path

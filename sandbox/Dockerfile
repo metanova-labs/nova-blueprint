@@ -22,6 +22,8 @@ RUN python -m pip install --upgrade pip && \
     python -m pip install -r /usr/local/lib/python3.12/site-packages/nova_miner/requirements/sandbox.txt
 
 COPY sandbox/entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
+COPY sandbox/extract.py /usr/local/bin/sandbox-extract.py
+RUN ln -s /tmp/workspace /workspace
 
 # Drop privileges
 USER mineruser

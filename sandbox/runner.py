@@ -1,11 +1,10 @@
 import json
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Tuple
 import threading
 
 from config.config_loader import load_sandbox_limits, load_time_budget_sec  
@@ -34,39 +33,17 @@ def ensure_docker_image() -> None:
         bt.logging.warning(f"Pull failed for {SANDBOX_IMAGE_TAG}: {e}. Using local image if available.")
         subprocess.run(["docker", "image", "inspect", SANDBOX_IMAGE_TAG], check=True)
 
-def prepare_workdir(source_dir: Path, challenge_params: dict, dest_dir: Optional[Path] = None) -> Tuple[Path, Path]:
-    work_root = DATA_WORK_ROOT
-    work_root.mkdir(parents=True, exist_ok=True)
-    if dest_dir is None:
-        workdir = Path(tempfile.mkdtemp(prefix="run_", dir=str(work_root)))
-    else:
-        workdir = Path(dest_dir)
-        workdir.mkdir(parents=True, exist_ok=True)
-    outdir = workdir / "out"
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    if not (source_dir / "miner.py").is_file():
-        raise FileNotFoundError(f"miner.py not found in {source_dir}")
-
-    # If source_dir and workdir are different, copy source into workdir.
-    if source_dir.resolve() != workdir.resolve():
-        for entry in source_dir.iterdir():
-            if entry.name in {".git", ".hg", ".svn", "__pycache__"}:
-                continue
-            dest = workdir / entry.name
-            if entry.is_dir():
-                shutil.copytree(entry, dest, dirs_exist_ok=True)
-            else:
-                shutil.copy2(entry, dest)
-
-    with open(workdir / "input.json", "w", encoding="utf-8") as f:
-        json.dump(challenge_params, f)
-
+def prepare_workdir(challenge_params: dict, dest_dir: Path) -> Tuple[Path, Path]:
+    dest_dir.parent.mkdir(parents=True, exist_ok=True)
+    workdir = Path(tempfile.mkdtemp(prefix=dest_dir.name + "_", dir=dest_dir.parent))
     workdir.chmod(0o755)
+    outdir = workdir / "out"
+    outdir.mkdir()
     os.chown(outdir, SANDBOX_UID, -1)
     outdir.chmod(0o700)
-
-
+    with (workdir / "input.json").open("w", encoding="utf-8") as f:
+        json.dump(challenge_params, f)
+    (workdir / "input.json").chmod(0o444)
     return workdir, outdir
 
 
@@ -134,7 +111,8 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
         "-e", "WORKDIR=/workspace",
         "-e", "OUTPUT_DIR=/output",
         "-e", "ORACLE_SOCKET=/run/oracle.sock",
-        "-v", f"{host_workdir}:/workspace:ro",
+        "-v", f"{host_workdir / 'submission.tar.gz'}:/run/submission.tar.gz:ro",
+        "-v", f"{host_workdir / 'input.json'}:/run/input.json:ro",
         "-v", f"{host_outdir}:/output:rw",
         "-v", f"{host_sock}:/run/oracle.sock",
         "--label", "app=nova_blueprint",

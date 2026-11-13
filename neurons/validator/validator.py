@@ -2,7 +2,6 @@ import argparse
 import datetime as dt
 import json
 import os
-import shutil
 import sys
 import time
 from dataclasses import dataclass
@@ -19,7 +18,7 @@ from utils.challenge_params import build_challenge_params
 from sandbox.broker import register_proteins
 from neurons.validator import scoring as scoring_module
 from neurons.validator.code_archive import (
-    download_and_extract_snapshot,
+    download_snapshot,
     download_benchmark_snapshot,
 )
 from neurons.validator.contest import (
@@ -46,7 +45,6 @@ def _benchmark_snapshot_name(uid: int) -> str:
     if int(uid) == BENCHMARK_UID_THOMPSON:
         return "thompson_sampling"
     raise ValueError(f"Unknown benchmark uid={uid} (expected {BENCHMARK_UID_RANDOM} or {BENCHMARK_UID_THOMPSON})")
-
 
 
 @dataclass
@@ -294,13 +292,6 @@ def build_run_list(entrants: List[Miner], state: dict) -> List[Miner]:
     return run_list
 
 
-def ensure_miner_exists(repo_dir: Path) -> Path:
-    miner_path = repo_dir / "miner.py"
-    if not miner_path.is_file():
-        raise FileNotFoundError("miner.py not found at repository root")
-    return repo_dir
-
-
 def write_run_artifacts(runs_root: Path, period: int, miner: Miner, result_obj: Optional[Dict]) -> None:
     if result_obj is None:
         bt.logging.info(
@@ -339,7 +330,7 @@ def run_job(
     challenge_params: dict,
     period: int,
 ) -> None:
-    repo_dir: Optional[Path] = None
+    workdir: Optional[Path] = None
     result_obj: Optional[Dict] = None
     cleanup_failed = False
 
@@ -348,13 +339,13 @@ def run_job(
         # run is greppable across disk, docker and loki.
         entry_token = miner.entry_id or miner.submission_name or f"benchmark_{miner.uid}"
         dest = work_root / f"{period}_{_safe_path_token(entry_token)}"
+        workdir, outdir = runner.prepare_workdir(challenge_params, dest_dir=dest)
+        archive_path = workdir / "submission.tar.gz"
 
         if miner.kind == "benchmark":
             try:
                 snapshot_name = _benchmark_snapshot_name(int(miner.uid))
-                repo_dir = download_benchmark_snapshot(
-                    work_root=work_root, dest_dir=dest, name=snapshot_name
-                )
+                download_benchmark_snapshot(archive_path=archive_path, name=snapshot_name)
                 bt.logging.info(
                     f"using benchmark snapshot name={snapshot_name} uid={miner.uid}"
                 )
@@ -364,13 +355,12 @@ def run_job(
         else:
             effective_epoch = miner.snapshot_epoch if miner.snapshot_epoch is not None else period
             try:
-                repo_dir = download_and_extract_snapshot(
+                snapshot = download_snapshot(
                     epoch=effective_epoch,
                     hotkey=miner.hotkey,
-                    work_root=work_root,
-                    dest_dir=dest,
+                    archive_path=archive_path,
                 )
-                if repo_dir is not None:
+                if snapshot is not None:
                     bt.logging.info(
                         f"using archived snapshot for entry={miner.entry_id} epoch={effective_epoch}"
                     )
@@ -379,19 +369,16 @@ def run_job(
                     f"snapshot download failed for entry={miner.entry_id} epoch={effective_epoch}: "
                     f"{type(e).__name__}: {e}"
                 )
-                repo_dir = None
+                snapshot = None
 
-            if repo_dir is None:
+            if snapshot is None:
                 bt.logging.info(
                     f"no archived snapshot available for entry={miner.entry_id} epoch={effective_epoch}; skipping run"
                 )
                 return
 
-        miner_dir = ensure_miner_exists(repo_dir)
-
         runner.ensure_docker_image()
 
-        workdir, outdir = runner.prepare_workdir(miner_dir, challenge_params, dest_dir=dest)
         bt.logging.info(f"run started for {miner.kind} entry={entry_token}")
         code, output = runner.run_container(workdir, outdir, period=period, entry_id=entry_token)
         bt.logging.info(f"run finished entry={entry_token} exit={code}")
@@ -424,18 +411,16 @@ def run_job(
 
     except runner.SandboxCleanupError:
         cleanup_failed = True
-        bt.logging.error(f"sandbox cleanup failed entry={entry_token}; stopping round, preserving {repo_dir}")
+        bt.logging.error(f"sandbox cleanup failed entry={entry_token}; stopping round, preserving {workdir}")
         raise
     except Exception as e:
         bt.logging.error(f"run failed entry={entry_token}: {type(e).__name__}: {e}")
     finally:
-        if repo_dir is not None and not cleanup_failed:
+        if workdir is not None and not cleanup_failed:
             try:
-                shutil.rmtree(repo_dir, ignore_errors=True)
-            except Exception as cleanup_err:
-                bt.logging.warning(
-                    f"cleanup: failed to remove {repo_dir}: {type(cleanup_err).__name__}: {cleanup_err}"
-                )
+                (workdir / "submission.tar.gz").unlink(missing_ok=True)
+            except OSError as cleanup_err:
+                bt.logging.warning(f"cleanup: failed to remove archive in {workdir}: {cleanup_err}")
 
     write_run_artifacts(runs_root, period, miner, result_obj)
 
