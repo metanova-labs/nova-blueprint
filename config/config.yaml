@@ -73,6 +73,7 @@ run:
   emission_target_override_share: 1.0
 
 sandbox:
+  # Memory includes process memory and tmpfs usage.
   memory: 48g
   cpus: 14
   pids_limit: 4096

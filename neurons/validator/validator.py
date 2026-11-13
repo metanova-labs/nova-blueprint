@@ -2,6 +2,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import shutil
 import sys
 import time
 from dataclasses import dataclass
@@ -331,6 +332,7 @@ def run_job(
     period: int,
 ) -> None:
     workdir: Optional[Path] = None
+    outdir: Optional[Path] = None
     result_obj: Optional[Dict] = None
     cleanup_failed = False
 
@@ -416,13 +418,16 @@ def run_job(
     except Exception as e:
         bt.logging.error(f"run failed entry={entry_token}: {type(e).__name__}: {e}")
     finally:
-        if workdir is not None and not cleanup_failed:
+        if not cleanup_failed:
             try:
-                (workdir / "submission.tar.gz").unlink(missing_ok=True)
-            except OSError as cleanup_err:
-                bt.logging.warning(f"cleanup: failed to remove archive in {workdir}: {cleanup_err}")
-
-    write_run_artifacts(runs_root, period, miner, result_obj)
+                write_run_artifacts(runs_root, period, miner, result_obj)
+            finally:
+                for path in (outdir, workdir):
+                    if path is not None:
+                        try:
+                            shutil.rmtree(path)
+                        except OSError as cleanup_err:
+                            bt.logging.warning(f"cleanup: failed to remove {path}: {cleanup_err}")
 
 
 async def main() -> int:
