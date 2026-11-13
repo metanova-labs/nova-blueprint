@@ -5,8 +5,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Tuple, Optional
-import threading
+from typing import Tuple
 
 from config.config_loader import load_sandbox_limits, load_time_budget_sec  
 from sandbox.broker import Broker
@@ -15,10 +14,15 @@ import bittensor as bt
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_WORK_ROOT = Path("/data/miner_runs")
-DATA_RESULTS_ROOT = Path("/data/results")
+DATA_OUTPUT_ROOT = Path("/data/miner_output")
 
 SANDBOX_IMAGE_TAG = "urdof7/miner-sandbox:latest"
+SANDBOX_UID = 10001  # mineruser in sandbox/Dockerfile
 SANDBOX_DB_DIR = "/usr/local/lib/python3.12/site-packages/nova_miner/combinatorial_db"
+
+
+class SandboxCleanupError(RuntimeError):
+    pass
 
 
 def ensure_docker_image() -> None:
@@ -29,58 +33,32 @@ def ensure_docker_image() -> None:
         bt.logging.warning(f"Pull failed for {SANDBOX_IMAGE_TAG}: {e}. Using local image if available.")
         subprocess.run(["docker", "image", "inspect", SANDBOX_IMAGE_TAG], check=True)
 
-def prepare_workdir(source_dir: Path, challenge_params: dict, dest_dir: Optional[Path] = None) -> Tuple[Path, Path]:
-    work_root = DATA_WORK_ROOT
-    work_root.mkdir(parents=True, exist_ok=True)
-    if dest_dir is None:
-        workdir = Path(tempfile.mkdtemp(prefix="run_", dir=str(work_root)))
-    else:
-        workdir = Path(dest_dir)
-        workdir.mkdir(parents=True, exist_ok=True)
-    outdir = workdir / "out"
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    if not (source_dir / "miner.py").is_file():
-        raise FileNotFoundError(f"miner.py not found in {source_dir}")
-
-    # If source_dir and workdir are different, copy source into workdir.
-    if source_dir.resolve() != workdir.resolve():
-        for entry in source_dir.iterdir():
-            if entry.name in {".git", ".hg", ".svn", "__pycache__"}:
-                continue
-            dest = workdir / entry.name
-            if entry.is_dir():
-                shutil.copytree(entry, dest, dirs_exist_ok=True)
-            else:
-                shutil.copy2(entry, dest)
-
-    with open(workdir / "input.json", "w", encoding="utf-8") as f:
-        json.dump(challenge_params, f)
-
-    # Ensure outdir is writable by the sandbox user
+def prepare_workdir(challenge_params: dict, dest_dir: Path) -> Tuple[Path, Path]:
+    if not DATA_OUTPUT_ROOT.is_mount():
+        raise RuntimeError("Miner output volume is not mounted")
+    dest_dir.parent.mkdir(parents=True, exist_ok=True)
+    workdir = Path(tempfile.mkdtemp(prefix=dest_dir.name + "_", dir=dest_dir.parent))
+    outdir = None
     try:
-        host_uid = os.stat(PROJECT_ROOT).st_uid
-        host_gid = os.stat(PROJECT_ROOT).st_gid
-        os.chown(outdir, host_uid, host_gid)
-    except Exception:
-        pass
-
-
-    return workdir, outdir
+        workdir.chmod(0o755)
+        outdir = Path(tempfile.mkdtemp(prefix=workdir.name + "_", dir=DATA_OUTPUT_ROOT))
+        os.chown(outdir, SANDBOX_UID, -1)
+        outdir.chmod(0o700)
+        with (workdir / "input.json").open("w", encoding="utf-8") as f:
+            json.dump(challenge_params, f)
+        (workdir / "input.json").chmod(0o444)
+        return workdir, outdir
+    except OSError:
+        for path in (outdir, workdir):
+            if path is not None:
+                shutil.rmtree(path)
+        raise
 
 
 def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tuple[int, str]:
     timeout_seconds = load_time_budget_sec() 
     limits = load_sandbox_limits()
-    def _to_str(x) -> str:
-        if x is None:
-            return ""
-        if isinstance(x, (bytes, bytearray)):
-            try:
-                return x.decode("utf-8", errors="replace")
-            except Exception:
-                return str(x)
-        return str(x)
+    output_volume = os.environ["MINER_OUTPUT_VOLUME"]
     # Translate container /data path to host path for docker -v
     host_runs_root = Path(os.environ.get("HOST_MINER_RUNS", str(DATA_WORK_ROOT)))
     try:
@@ -88,13 +66,6 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
         host_workdir = (host_runs_root / rel).resolve()
     except Exception:
         host_workdir = workdir
-    try:
-        rel_out = outdir.relative_to(DATA_WORK_ROOT)
-        host_outdir = (host_runs_root / rel_out).resolve()
-    except Exception:
-        host_outdir = outdir
-    host_uid = os.stat(PROJECT_ROOT).st_uid
-    host_gid = os.stat(PROJECT_ROOT).st_gid
 
     # docker -v is resolved by the host daemon, so pass the host path.
     sock_path = workdir / "oracle.sock"
@@ -116,6 +87,9 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
 
     cmd = [
         "docker", "run", "--rm",
+        "--log-driver=json-file",
+        "--log-opt=max-size=64m",
+        "--log-opt=max-file=4",
         "--read-only",
         "--cap-drop=ALL",
         "--security-opt", "no-new-privileges:true",
@@ -126,7 +100,7 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
         "--tmpfs", f"/tmp:rw,noexec,nosuid,nodev,size={limits['tmp_size']}",
         "--tmpfs", f"{SANDBOX_DB_DIR}:rw,noexec,nosuid,nodev,mode=1777,size={limits['db_size']}",
         "--network=none",
-        "--user", f"{host_uid}:{host_gid}",
+        "--user", str(SANDBOX_UID),
         "-e", "HOME=/tmp",
         "-e", "XDG_CACHE_HOME=/tmp",
         "-e", "MPLCONFIGDIR=/tmp",
@@ -135,8 +109,9 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
         "-e", "WORKDIR=/workspace",
         "-e", "OUTPUT_DIR=/output",
         "-e", "ORACLE_SOCKET=/run/oracle.sock",
-        "-v", f"{host_workdir}:/workspace:ro",
-        "-v", f"{host_outdir}:/output:rw",
+        "-v", f"{host_workdir / 'submission.tar.gz'}:/run/submission.tar.gz:ro",
+        "-v", f"{host_workdir / 'input.json'}:/run/input.json:ro",
+        "--mount", f"type=volume,src={output_volume},dst=/output,volume-subpath={outdir.name},volume-nocopy",
         "-v", f"{host_sock}:/run/oracle.sock",
         "--label", "app=nova_blueprint",
         "--label", "role=miner",
@@ -145,63 +120,37 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
         "--name", container_name,
         SANDBOX_IMAGE_TAG,
     ]
-    with Broker(sock_path, miner=entry_id, epoch=str(period)), \
-            open(outdir / "log.txt", "w", encoding="utf-8") as logf:
-        logf.write("starting docker\n")
-        logf.flush()
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-
-        def _pump():
-            try:
-                assert proc.stdout is not None
-                for line in proc.stdout:
-                    logf.write(_to_str(line))
-                    logf.flush()
-            except Exception:
-                pass
-
-        t = threading.Thread(target=_pump, daemon=True)
-        t.start()
+    with Broker(sock_path, miner=entry_id, epoch=str(period)):
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
             rc = proc.wait(timeout=timeout_seconds)
-            t.join(timeout=2)
             return rc, ""
         except subprocess.TimeoutExpired:
+            bt.logging.info(f"miner time budget reached entry={entry_id}")
+            return 124, "timeout"
+        finally:
             try:
-                logf.write("timeout\n")
-                logf.flush()
-            except Exception:
-                pass
-            # Forcibly remove the running container using the captured ID
-            try:
-                if container_name:
-                    logf.write(f"timeout: removing container by name {container_name}\n")
-                    logf.flush()
+                try:
+                    if proc.poll() is None:
+                        proc.kill()
+                    proc.wait(timeout=10)
+                finally:
                     subprocess.run(
                         ["docker", "rm", "-f", "-v", container_name],
                         check=False,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
+                        timeout=30,
                     )
+                    # --rm may already have removed it. A successful list must confirm absence.
+                    remaining = subprocess.run(
+                        ["docker", "ps", "-aq", "--filter", f"name=^/{re.escape(container_name)}$"],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if remaining.stdout.strip():
+                        raise RuntimeError(f"Container still exists: {container_name}")
             except Exception as e:
-                bt.logging.warning(f"timeout cleanup failed for {container_name}: {e}")
-            try:
-                proc.kill()
-            except Exception:
-                pass
-            t.join(timeout=2)
-            return 124, "timeout"
-
-
- 
-
- 
- 
-
-
+                raise SandboxCleanupError(f"Sandbox cleanup failed: {container_name}") from e

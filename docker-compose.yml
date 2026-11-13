@@ -14,10 +14,12 @@ services:
       - PYTHONPATH=/app
       - HOST_MINER_RUNS=${PWD}/data/miner_runs
       - HOST_RESULTS=${PWD}/data/results
+      - MINER_OUTPUT_VOLUME=${MINER_OUTPUT_VOLUME:-nova-blueprint-miner-output}
     volumes:
       - ${BT_WALLETS_DIR:-$HOME/.bittensor/wallets}:/root/.bittensor/wallets:ro
       - ${PWD}/data/miner_runs:/data/miner_runs
       - ${PWD}/data/results:/data/results
+      - miner-output:/data/miner_output
       - /var/run/docker.sock:/var/run/docker.sock
     labels:
       app: nova_blueprint
@@ -33,3 +35,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     command: ["--interval", "300", "--cleanup", "--stop-timeout", "24h", "nova-blueprint"]
 
+volumes:
+  miner-output:
+    name: ${MINER_OUTPUT_VOLUME:-nova-blueprint-miner-output}
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1g,nr_inodes=65536,mode=0700,nosuid,nodev,noexec

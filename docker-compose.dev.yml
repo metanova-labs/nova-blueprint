@@ -16,10 +16,12 @@ services:
       - PYTHONPATH=/app
       - HOST_MINER_RUNS=${PWD}/data/miner_runs
       - HOST_RESULTS=${PWD}/data/results
+      - MINER_OUTPUT_VOLUME=${MINER_OUTPUT_VOLUME:-nova-blueprint-dev-miner-output}
     volumes:
       - ./:/app:rw
       - ${PWD}/data/miner_runs:/data/miner_runs
       - ${PWD}/data/results:/data/results
+      - miner-output:/data/miner_output
       - ${BT_WALLETS_DIR:-$HOME/.bittensor/wallets}:/root/.bittensor/wallets:ro
       - /var/run/docker.sock:/var/run/docker.sock
     env_file:
@@ -30,3 +32,12 @@ services:
       env: dev
     entrypoint: ["python", "neurons/validator/scheduler.py"]
     command: ["--wallet.name", "${BT_WALLET_COLD}", "--wallet.hotkey", "${BT_WALLET_HOT}", "--logging.debug", "--test_mode"]
+
+volumes:
+  miner-output:
+    name: ${MINER_OUTPUT_VOLUME:-nova-blueprint-dev-miner-output}
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1g,nr_inodes=65536,mode=0700,nosuid,nodev,noexec
