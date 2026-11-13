@@ -14,6 +14,7 @@ import asyncio
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 from sandbox import runner
+from sandbox.output import read_output_file
 from utils.challenge_params import build_challenge_params
 from sandbox.broker import register_proteins
 from neurons.validator import scoring as scoring_module
@@ -340,6 +341,7 @@ def run_job(
 ) -> None:
     repo_dir: Optional[Path] = None
     result_obj: Optional[Dict] = None
+    cleanup_failed = False
 
     try:
         # One token names the workdir, the container and the log stream, so a single
@@ -394,33 +396,40 @@ def run_job(
         code, output = runner.run_container(workdir, outdir, period=period, entry_id=entry_token)
         bt.logging.info(f"run finished entry={entry_token} exit={code}")
         try:
-            with open(outdir / "result.json", "r", encoding="utf-8") as f:
-                raw = json.load(f)
-            if isinstance(raw, dict) and "result" in raw and isinstance(raw["result"], dict):
-                result_obj = raw["result"]
-            elif isinstance(raw, dict):
-                result_obj = raw
+            raw = json.loads(read_output_file(outdir, "result.json").decode("utf-8"))
+            if not isinstance(raw, dict):
+                raise ValueError("result.json must contain a JSON object")
+            molecules = raw.get("molecules")
+            if not isinstance(molecules, list) or not all(isinstance(m, str) for m in molecules):
+                raise ValueError("molecules must be a list of strings")
+            result_obj = {"molecules": molecules}
             # Persist benchmark scores before cleanup
             if miner.kind == "benchmark" and int(miner.uid) == -1:
                 try:
-                    src_scores = outdir / "all_scores_0.json"
-                    if src_scores.exists():
-                        results_dir = Path("/data/results").resolve()
-                        results_dir.mkdir(parents=True, exist_ok=True)
-                        dst_scores = results_dir / f"period_{period}_benchmark_all_scores_0.json"
-                        shutil.copy2(src_scores, dst_scores)
-                        bt.logging.info(f"benchmark: saved scores to {dst_scores}")
+                    scores = read_output_file(outdir, "all_scores_0.json")
+                    results_dir = Path("/data/results").resolve()
+                    results_dir.mkdir(parents=True, exist_ok=True)
+                    dst_scores = results_dir / f"period_{period}_benchmark_all_scores_0.json"
+                    dst_scores.write_bytes(scores)
+                    bt.logging.info(f"benchmark: saved scores to {dst_scores}")
+                except FileNotFoundError:
+                    pass
                 except Exception as copy_err:
                     bt.logging.warning(
                         f"benchmark: failed to persist scores: {type(copy_err).__name__}: {copy_err}"
                     )
-        except Exception:
+        except Exception as e:
+            bt.logging.warning(f"invalid output entry={entry_token}: {type(e).__name__}: {e}")
             result_obj = None
 
+    except runner.SandboxCleanupError:
+        cleanup_failed = True
+        bt.logging.error(f"sandbox cleanup failed entry={entry_token}; stopping round, preserving {repo_dir}")
+        raise
     except Exception as e:
         bt.logging.error(f"run failed entry={entry_token}: {type(e).__name__}: {e}")
     finally:
-        if repo_dir is not None:
+        if repo_dir is not None and not cleanup_failed:
             try:
                 shutil.rmtree(repo_dir, ignore_errors=True)
             except Exception as cleanup_err:
@@ -498,6 +507,8 @@ async def main() -> int:
         )
         bt.logging.info(f"benchmark: running brute_force snapshot (uid={BENCHMARK_UID_RANDOM})")
         run_job(benchmark, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
+    except runner.SandboxCleanupError:
+        raise
     except Exception as e:
         bt.logging.error(f"benchmark run failed: {type(e).__name__}: {e}")
 
@@ -511,6 +522,8 @@ async def main() -> int:
         )
         bt.logging.info(f"thompson_sampling: running snapshot (uid={BENCHMARK_UID_THOMPSON})")
         run_job(ts_benchmark, runs_root=runs_root, work_root=work_root, challenge_params=challenge_params, period=period)
+    except runner.SandboxCleanupError:
+        raise
     except Exception as e:
         bt.logging.error(f"thompson_sampling run failed: {type(e).__name__}: {e}")
 

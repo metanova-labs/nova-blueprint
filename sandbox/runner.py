@@ -22,6 +22,10 @@ SANDBOX_UID = 10001  # mineruser in sandbox/Dockerfile
 SANDBOX_DB_DIR = "/usr/local/lib/python3.12/site-packages/nova_miner/combinatorial_db"
 
 
+class SandboxCleanupError(RuntimeError):
+    pass
+
+
 def ensure_docker_image() -> None:
     try:
         bt.logging.info(f"Pulling Docker image {SANDBOX_IMAGE_TAG}…")
@@ -165,38 +169,36 @@ def run_container(workdir: Path, outdir: Path, period: int, entry_id: str) -> Tu
         t.start()
         try:
             rc = proc.wait(timeout=timeout_seconds)
-            t.join(timeout=2)
             return rc, ""
         except subprocess.TimeoutExpired:
+            logf.write("timeout\n")
+            logf.flush()
+            return 124, "timeout"
+        finally:
             try:
-                logf.write("timeout\n")
-                logf.flush()
-            except Exception:
-                pass
-            # Forcibly remove the running container using the captured ID
-            try:
-                if container_name:
-                    logf.write(f"timeout: removing container by name {container_name}\n")
-                    logf.flush()
+                try:
+                    if proc.poll() is None:
+                        proc.kill()
+                    proc.wait(timeout=10)
+                finally:
                     subprocess.run(
                         ["docker", "rm", "-f", "-v", container_name],
                         check=False,
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
+                        timeout=30,
                     )
+                    # --rm may already have removed it. A successful list must confirm absence.
+                    remaining = subprocess.run(
+                        ["docker", "ps", "-aq", "--filter", f"name=^/{re.escape(container_name)}$"],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if remaining.stdout.strip():
+                        raise RuntimeError(f"Container still exists: {container_name}")
             except Exception as e:
-                bt.logging.warning(f"timeout cleanup failed for {container_name}: {e}")
-            try:
-                proc.kill()
-            except Exception:
-                pass
-            t.join(timeout=2)
-            return 124, "timeout"
-
-
- 
-
- 
- 
-
-
+                raise SandboxCleanupError(f"Sandbox cleanup failed: {container_name}") from e
+            finally:
+                t.join(timeout=2)
